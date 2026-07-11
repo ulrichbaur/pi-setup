@@ -12,6 +12,18 @@ Development requires Node.js 22.6 or newer and pnpm 11.9.0.
 - `themes/` — JSON themes
 - `tests/` — tests for extensions and supporting code
 
+## Extensions
+
+### Model effort
+
+`extensions/model-effort.ts` remembers the selected thinking level for each exact
+provider/model pair. When a model does not support the saved level, it uses the
+closest supported lower level.
+
+Preferences are stored in `~/.pi/agent/model-effort.json` (or below
+`PI_CODING_AGENT_DIR` when set). The file is created with user-only permissions.
+Delete it to reset all saved levels.
+
 ## Develop locally
 
 Install this checkout as a local Pi package:
