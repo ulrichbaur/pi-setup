@@ -24,6 +24,20 @@ Preferences are stored in `~/.pi/agent/model-effort.json` (or below
 `PI_CODING_AGENT_DIR` when set). The file is created with user-only permissions.
 Delete it to reset all saved levels.
 
+### Skill policy
+
+`extensions/skill-policy/` controls which installed skills the model may see
+and invoke automatically. Skills remain available through manual `/skill:name`
+commands. The default is fail-closed: no skills are exposed automatically, and
+a malformed policy also hides all skills.
+
+Run `/skill-policy` inside Pi to open the interactive allowlist editor.
+
+The allowlist is stored in `skill-policy.json` below `PI_CODING_AGENT_DIR`, or
+in `~/.pi/agent/skill-policy.json` when that variable is unset, with user-only
+permissions. Delete it to restore the default empty allowlist. Run `/reload`
+after installing or updating extensions; policy changes apply without a reload.
+
 ## Develop locally
 
 Install this checkout as a local Pi package:
