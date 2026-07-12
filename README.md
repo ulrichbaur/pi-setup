@@ -38,6 +38,51 @@ in `~/.pi/agent/skill-policy.json` when that variable is unset, with user-only
 permissions. Delete it to restore the default empty allowlist. Run `/reload`
 after installing or updating extensions; policy changes apply without a reload.
 
+### Pi statusline
+
+`extensions/pi-statusline/` replaces Pi's TUI footer with the active
+provider/model, thinking level, context use, session cost, cache-hit rate, and
+available Codex or OpenCode Go quota windows. It runs only in TUI mode.
+
+Quota display is enabled by default. Configure it interactively with
+`/statusline`, which opens a menu for toggling the Codex and OpenCode Go
+quota sources, editing the OpenCode Go workspace ID, setting the auth cookie,
+and previewing the current config. Changes are kept in memory until you
+choose **Save & reload**; **Discard & exit** drops them. The menu re-reads the
+on-disk config on open, so external edits show up correctly.
+
+The non-secret config lives in `~/.pi/agent/pi-statusline.json` (or below
+`PI_CODING_AGENT_DIR` when set):
+
+```json
+{
+  "opencodeGo": {
+    "workspaceId": "your-workspace-id"
+  },
+  "quotas": {
+    "codex": true,
+    "opencodeGo": true
+  }
+}
+```
+
+Codex uses Pi's `openai-codex` login. OpenCode Go additionally requires its
+`auth` cookie value in `~/.pi/agent/pi-statusline.auth.json` (or below
+`PI_CODING_AGENT_DIR`):
+
+```json
+{
+  "opencodeGo": {
+    "authCookie": "cookie-value"
+  }
+}
+```
+
+If you create the auth file manually, protect it with
+`chmod 600 ~/.pi/agent/pi-statusline.auth.json`. Disable either quota source
+by flipping its `quotas` value to `false` in the menu. Run `/reload` after
+manually changing either file.
+
 ## Develop locally
 
 Install this checkout as a local Pi package:
