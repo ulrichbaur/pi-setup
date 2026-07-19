@@ -24,6 +24,17 @@ Preferences are stored in `~/.pi/agent/model-effort.json` (or below
 `PI_CODING_AGENT_DIR` when set). The file is created with user-only permissions.
 Delete it to reset all saved levels.
 
+### Skill palette
+
+`extensions/skill-palette/` provides `/skill`, a searchable picker that queues a
+skill for the next message. Unlike `pi-skill-palette`, it reads Pi's effective
+loaded skill collection, so package `skills` filters in `settings.json` are
+respected. The injected skill block uses the same format as Pi's native
+`/skill:name` expansion.
+
+Remove `npm:pi-skill-palette` from `settings.json` before enabling this
+extension; otherwise Pi disambiguates the duplicate `/skill` commands.
+
 ### Skill policy
 
 `extensions/skill-policy/` controls which installed skills the model may see
