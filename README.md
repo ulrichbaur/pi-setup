@@ -94,6 +94,17 @@ If you create the auth file manually, protect it with
 by flipping its `quotas` value to `false` in the menu. Run `/reload` after
 manually changing either file.
 
+### Files
+
+`extensions/files/` provides `/files` (also `ctrl+shift+o`), a fuzzy-searchable
+browser over the current Git tree — tracked and untracked files with their Git
+status — plus files referenced or edited in the session. Dirty files sort
+first, then files changed this session, newest first. Selecting a file offers
+two actions: add an `@path` mention to the prompt, or copy the path to the
+clipboard. Renames keep their destination path, tracked symlinks keep their
+own path identity, and failed edit/write tool calls do not count as session
+changes. The browser requires TUI mode.
+
 ## Develop locally
 
 Install this checkout as a local Pi package:
