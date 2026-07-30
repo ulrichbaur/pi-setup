@@ -2,29 +2,32 @@
 
 import type { QuotaStatus, QuotaWindow } from "./quota/types.ts";
 
-// ─── ANSI colors ────────────────────────────────────────────────────────────
+// ─── styling ────────────────────────────────────────────────────────────────
 
-const R = "\x1b[0m";
-const DIM = "\x1b[2m";
-// Usage colors move from comfortable to warning as a limit fills.
-const FOAM = "\x1b[38;5;116m";
-const GOLD = "\x1b[38;5;222m";
-const LOVE = "\x1b[38;5;211m";
-const IRIS = "\x1b[38;5;183m"; // Model-name accent.
+export type StatuslineStyles = {
+  dim(text: string): string;
+  accent(text: string): string;
+  success(text: string): string;
+  warning(text: string): string;
+  error(text: string): string;
+};
 
-const SEP = `${DIM}·${R}`;
+// Kept as the default for formatter callers outside the TUI. The footer passes
+// theme-backed styles so light and dark themes both retain suitable contrast.
+const ansi = (code: string) => (text: string) => `\x1b[${code}m${text}\x1b[0m`;
+const DEFAULT_STYLES: StatuslineStyles = {
+  dim: ansi("2"),
+  accent: ansi("38;5;183"),
+  success: ansi("38;5;116"),
+  warning: ansi("38;5;222"),
+  error: ansi("38;5;211"),
+};
 
 // Reserve warning colors for the final 40% and 15% of available capacity.
-function fillColor(percent: number): string {
-  if (percent < 60) return FOAM;
-  if (percent < 85) return GOLD;
-  return LOVE;
-}
-
-function usedColor(percentUsed: number): string {
-  if (percentUsed < 60) return FOAM;
-  if (percentUsed < 85) return GOLD;
-  return LOVE;
+function fillStyle(percent: number, styles: StatuslineStyles) {
+  if (percent < 60) return styles.success;
+  if (percent < 85) return styles.warning;
+  return styles.error;
 }
 
 // ─── snapshot / format ──────────────────────────────────────────────────────
@@ -42,7 +45,10 @@ export type StatusSnapshot = {
   quota?: QuotaStatus;
 };
 
-export function formatStatusline(snapshot: StatusSnapshot): string {
+export function formatStatusline(
+  snapshot: StatusSnapshot,
+  styles: StatuslineStyles = DEFAULT_STYLES,
+): string {
   const parts: string[] = [];
 
   const model = compactModel(snapshot.model);
@@ -50,11 +56,16 @@ export function formatStatusline(snapshot: StatusSnapshot): string {
     snapshot.provider && model
       ? `${snapshot.provider}/${model}`
       : snapshot.provider || model;
-  if (modelPart) parts.push(formatModelPart(modelPart, snapshot.thinkingLevel));
+  if (modelPart)
+    parts.push(formatModelPart(modelPart, snapshot.thinkingLevel, styles));
 
   if (snapshot.context?.tokens) {
     parts.push(
-      formatContext(snapshot.context.tokens, snapshot.context.maxTokens),
+      formatContext(
+        snapshot.context.tokens,
+        snapshot.context.maxTokens,
+        styles,
+      ),
     );
   }
 
@@ -72,12 +83,15 @@ export function formatStatusline(snapshot: StatusSnapshot): string {
   }
   if (costParts.length) parts.push(costParts.join(" "));
 
-  return parts.join(` ${SEP} `);
+  return parts.join(` ${styles.dim("·")} `);
 }
 
-export function formatQuotaLine(snapshot: StatusSnapshot): string {
+export function formatQuotaLine(
+  snapshot: StatusSnapshot,
+  styles: StatuslineStyles = DEFAULT_STYLES,
+): string {
   if (!snapshot.quota?.windows.length && !snapshot.quota?.error) return "";
-  return formatQuota(snapshot.quota);
+  return formatQuota(snapshot.quota, styles);
 }
 
 // Provider APIs sometimes prefix IDs with this redundant registry namespace.
@@ -89,35 +103,44 @@ function compactModel(model: string | undefined): string | undefined {
 function formatModelPart(
   modelPart: string,
   thinkingLevel: string | undefined,
+  styles: StatuslineStyles,
 ): string {
-  const colored = `${IRIS}${modelPart}${R}`;
+  const colored = styles.accent(modelPart);
   if (!thinkingLevel || thinkingLevel === "off") return colored;
-  return `${colored} ${DIM}(${thinkingLevel})${R}`;
+  return `${colored} ${styles.dim(`(${thinkingLevel})`)}`;
 }
 
-function formatContext(tokens: number, maxTokens: number | undefined): string {
+function formatContext(
+  tokens: number,
+  maxTokens: number | undefined,
+  styles: StatuslineStyles,
+): string {
   if (maxTokens && maxTokens > 0) {
     const percent = (tokens / maxTokens) * 100;
-    const color = fillColor(percent);
-    return `${color}${formatPercentValue(percent)}${R}/${formatNumber(maxTokens)}`;
+    return `${fillStyle(percent, styles)(formatPercentValue(percent))}/${formatNumber(maxTokens)}`;
   }
   return formatNumber(tokens);
 }
 
-function formatQuota(quota: QuotaStatus): string {
-  if (quota.error) return quota.error;
+function formatQuota(quota: QuotaStatus, styles: StatuslineStyles): string {
+  if (quota.error) return styles.error(quota.error);
   if (!quota.windows.length) return "";
-  const line = quota.windows.map(formatQuotaWindow).join(` ${DIM}|${R} `);
-  return quota.stale ? `${line} ${DIM}(stale)${R}` : line;
+  const line = quota.windows
+    .map((window) => formatQuotaWindow(window, styles))
+    .join(` ${styles.dim("|")} `);
+  return quota.stale ? `${line} ${styles.dim("(stale)")}` : line;
 }
 
-function formatQuotaWindow(window: QuotaWindow): string {
+function formatQuotaWindow(
+  window: QuotaWindow,
+  styles: StatuslineStyles,
+): string {
   const percentUsed = 100 - window.percentRemaining;
-  const color = usedColor(percentUsed);
   const reset = window.resetsAt
-    ? ` ${DIM}↺ ${formatResetCountdown(window.resetsAt)}${R}`
+    ? ` ${styles.dim(`↺ ${formatResetCountdown(window.resetsAt)}`)}`
     : "";
-  return `${color}${window.label}: ${percentUsed.toFixed(window.precision ?? 1)}%${R}${reset}`;
+  const usage = `${window.label}: ${percentUsed.toFixed(window.precision ?? 1)}%`;
+  return `${fillStyle(percentUsed, styles)(usage)}${reset}`;
 }
 
 // Round to seconds so countdowns do not imply sub-second precision.

@@ -71,9 +71,11 @@ test("formats quota windows, stale data, and errors", () => {
   );
   assert.equal(line, "5h: 25% | 7d: 87.5% (stale)");
   assert.equal(
-    formatQuotaLine({
-      quota: quota({ windows: [], error: "quota unavailable" }),
-    }),
+    stripAnsi(
+      formatQuotaLine({
+        quota: quota({ windows: [], error: "quota unavailable" }),
+      }),
+    ),
     "quota unavailable",
   );
   assert.equal(formatQuotaLine({ quota: quota({ windows: [] }) }), "");

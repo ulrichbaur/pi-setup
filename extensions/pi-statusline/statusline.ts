@@ -9,6 +9,7 @@ import type {
 import {
   formatQuotaLine,
   formatStatusline,
+  type StatuslineStyles,
   type StatusSnapshot,
 } from "./format.ts";
 import type { QuotaAdapter, QuotaStatus } from "./quota/types.ts";
@@ -24,8 +25,7 @@ export function createStatuslineRuntime(
 ): StatuslineRuntime {
   const lastQuotaByProvider = new Map<string, QuotaStatus>();
   let footerInstalled = false;
-  let latestLine = "";
-  let latestQuotaLine = "";
+  let latestSnapshot: StatusSnapshot = {};
   let requestRender: (() => void) | undefined;
 
   // Pi owns one footer; install it once and update the closed-over rendered values.
@@ -42,10 +42,19 @@ export function createStatuslineRuntime(
         render(width: number): string[] {
           const pad = width > 1 ? " " : "";
           const avail = width > 1 ? width - 1 : width;
+          const styles: StatuslineStyles = {
+            dim: (text) => theme.fg("muted", text),
+            accent: (text) => theme.fg("accent", text),
+            success: (text) => theme.fg("success", text),
+            warning: (text) => theme.fg("warning", text),
+            error: (text) => theme.fg("error", text),
+          };
+          const latestLine = formatStatusline(latestSnapshot, styles);
+          const latestQuotaLine = formatQuotaLine(latestSnapshot, styles);
           const lines: string[] = [
             pad +
               theme
-                .fg("dim", formatLocationLine(ctx, footerData.getGitBranch()))
+                .fg("muted", formatLocationLine(ctx, footerData.getGitBranch()))
                 .slice(0, avail),
             pad + latestLine.slice(0, avail),
           ];
@@ -77,8 +86,7 @@ export function createStatuslineRuntime(
         quota ?? (provider ? lastQuotaByProvider.get(provider) : undefined),
     });
 
-    latestLine = formatStatusline(snapshot);
-    latestQuotaLine = formatQuotaLine(snapshot);
+    latestSnapshot = snapshot;
     installFooter(ctx);
     requestRender?.();
   }
