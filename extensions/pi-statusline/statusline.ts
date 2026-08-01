@@ -6,9 +6,11 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
+  formatModelStatus,
   formatQuotaLine,
-  formatStatusline,
+  formatStatusStats,
   type StatuslineStyles,
   type StatusSnapshot,
 } from "./format.ts";
@@ -27,6 +29,7 @@ export function createStatuslineRuntime(
   let footerInstalled = false;
   let latestSnapshot: StatusSnapshot = {};
   let requestRender: (() => void) | undefined;
+  let updateVersion = 0;
 
   // Pi owns one footer; install it once and update the closed-over rendered values.
   function installFooter(ctx: ExtensionContext): void {
@@ -49,16 +52,22 @@ export function createStatuslineRuntime(
             warning: (text) => theme.fg("warning", text),
             error: (text) => theme.fg("error", text),
           };
-          const latestLine = formatStatusline(latestSnapshot, styles);
+          const stats = formatStatusStats(latestSnapshot, styles);
+          const model = formatModelStatus(latestSnapshot, styles);
+          const latestLine = alignStatusLine(stats, model, avail);
           const latestQuotaLine = formatQuotaLine(latestSnapshot, styles);
           const lines: string[] = [
             pad +
-              theme
-                .fg("muted", formatLocationLine(ctx, footerData.getGitBranch()))
-                .slice(0, avail),
-            pad + latestLine.slice(0, avail),
+              truncateToWidth(
+                formatLocationLine(ctx, footerData.getGitBranch(), (text) =>
+                  theme.fg("muted", text),
+                ),
+                avail,
+                theme.fg("muted", "..."),
+              ),
+            pad + latestLine,
           ];
-          const quota = latestQuotaLine.slice(0, avail);
+          const quota = truncateToWidth(latestQuotaLine, avail, "");
           if (quota) lines.push(pad + quota);
           return lines;
         },
@@ -75,6 +84,7 @@ export function createStatuslineRuntime(
     if (!ctx.hasUI || ctx.mode !== "tui") return;
 
     const provider = ctx.model?.provider;
+    const version = ++updateVersion;
 
     // Replace Pi's default footer immediately; quota I/O must not block the
     // statusline's model, context, and session details from becoming visible.
@@ -85,6 +95,8 @@ export function createStatuslineRuntime(
     requestRender?.();
 
     const quota = await resolveQuota(ctx, adapters).catch(() => undefined);
+    // A model/session event may have started a newer update while quota I/O was pending.
+    if (version !== updateVersion) return;
     // Keep the last usable reading visible while a refresh is temporarily unavailable.
     if (quota && provider && (quota.windows.length > 0 || quota.error)) {
       lastQuotaByProvider.set(provider, quota);
@@ -96,6 +108,7 @@ export function createStatuslineRuntime(
   }
 
   function dispose(ctx: ExtensionContext): void {
+    updateVersion++;
     if (ctx.mode === "tui" && footerInstalled) {
       ctx.ui.setFooter(undefined);
       footerInstalled = false;
@@ -122,18 +135,47 @@ async function resolveQuota(
   });
 }
 
+function alignStatusLine(left: string, right: string, width: number): string {
+  if (!right) return truncateToWidth(left, width, "...");
+  if (!left) {
+    const fittedRight = truncateToWidth(right, width, "");
+    return (
+      " ".repeat(Math.max(0, width - visibleWidth(fittedRight))) + fittedRight
+    );
+  }
+
+  const minPadding = 2;
+  const rightWidth = visibleWidth(right);
+  const fittedLeft = truncateToWidth(left, width, "...");
+  const leftWidth = visibleWidth(fittedLeft);
+
+  if (leftWidth + minPadding + rightWidth <= width) {
+    return fittedLeft + " ".repeat(width - leftWidth - rightWidth) + right;
+  }
+
+  const availableForRight = Math.max(0, width - leftWidth - minPadding);
+  const fittedRight = truncateToWidth(right, availableForRight, "");
+  return (
+    fittedLeft +
+    " ".repeat(Math.max(0, width - leftWidth - visibleWidth(fittedRight))) +
+    fittedRight
+  );
+}
+
 function formatLocationLine(
   ctx: ExtensionContext,
   branch: string | null,
+  muted: (text: string) => string,
 ): string {
-  let line = formatCwdForFooter(
+  const cwd = formatCwdForFooter(
     ctx.cwd,
     process.env.HOME || process.env.USERPROFILE,
   );
-  if (branch) line = `${line} (${branch})`;
+  let line = muted(cwd);
+  if (branch) line += ` (${branch})`;
 
   const sessionName = ctx.sessionManager.getSessionName();
-  if (sessionName) line = `${line} • ${sessionName}`;
+  if (sessionName) line += muted(` • ${sessionName}`);
 
   return line;
 }
@@ -160,12 +202,15 @@ export function createStatusSnapshot(
   ctx: ExtensionContext,
   overrides: Pick<StatusSnapshot, "quota"> = {},
 ): StatusSnapshot {
+  const totals = readSessionTotals(ctx);
   return {
     provider: ctx.model?.provider,
     model: ctx.model?.id,
     thinkingLevel: pi.getThinkingLevel(),
     context: readContextUsage(ctx),
-    sessionCost: readSessionCost(ctx),
+    inputTokens: totals.input,
+    outputTokens: totals.output,
+    sessionCost: totals.cost,
     cacheHitRate: readCacheHitRate(ctx),
     ...overrides,
   };
@@ -183,15 +228,23 @@ function readContextUsage(ctx: ExtensionContext): StatusSnapshot["context"] {
 }
 
 // Sum the active branch only, excluding messages from abandoned conversation branches.
-function readSessionCost(ctx: ExtensionContext): number {
-  let total = 0;
+function readSessionTotals(ctx: ExtensionContext): {
+  input: number;
+  output: number;
+  cost: number;
+} {
+  let input = 0;
+  let output = 0;
+  let cost = 0;
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type !== "message" || entry.message.role !== "assistant")
       continue;
-    const message = entry.message as AssistantMessage;
-    total += message.usage?.cost?.total ?? 0;
+    const usage = (entry.message as AssistantMessage).usage;
+    input += usage?.input ?? 0;
+    output += usage?.output ?? 0;
+    cost += usage?.cost?.total ?? 0;
   }
-  return total;
+  return { input, output, cost };
 }
 
 function readCacheHitRate(ctx: ExtensionContext): number | undefined {

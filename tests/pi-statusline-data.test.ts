@@ -57,7 +57,7 @@ test("saves the OpenCode Go cookie without replacing other auth fields", async (
   }
 });
 
-test("snapshot derives context, assistant cost, and latest cache-hit rate", () => {
+test("snapshot derives context, token totals, cost, and latest cache-hit rate", () => {
   const assistant = (
     cost: number,
     input: number,
@@ -90,6 +90,8 @@ test("snapshot derives context, assistant cost, and latest cache-hit rate", () =
     ctx,
   );
   assert.deepEqual(snapshot.context, { tokens: 10_000, maxTokens: 200_000 });
+  assert.equal(snapshot.inputTokens, 105);
+  assert.equal(snapshot.outputTokens, 0);
   assert.ok(Math.abs((snapshot.sessionCost ?? 0) - 0.3) < Number.EPSILON);
   assert.equal(snapshot.cacheHitRate, 75);
 });

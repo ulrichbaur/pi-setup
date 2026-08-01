@@ -40,24 +40,18 @@ export type StatusSnapshot = {
     tokens?: number;
     maxTokens?: number;
   };
+  inputTokens?: number;
+  outputTokens?: number;
   sessionCost?: number;
   cacheHitRate?: number;
   quota?: QuotaStatus;
 };
 
-export function formatStatusline(
+export function formatStatusStats(
   snapshot: StatusSnapshot,
   styles: StatuslineStyles = DEFAULT_STYLES,
 ): string {
   const parts: string[] = [];
-
-  const model = compactModel(snapshot.model);
-  const modelPart =
-    snapshot.provider && model
-      ? `${snapshot.provider}/${model}`
-      : snapshot.provider || model;
-  if (modelPart)
-    parts.push(formatModelPart(modelPart, snapshot.thinkingLevel, styles));
 
   if (snapshot.context?.tokens) {
     parts.push(
@@ -69,21 +63,45 @@ export function formatStatusline(
     );
   }
 
-  const costParts: string[] = [];
-  if (typeof snapshot.sessionCost === "number" && snapshot.sessionCost > 0) {
-    costParts.push(
-      `$${snapshot.sessionCost.toFixed(snapshot.sessionCost < 0.01 ? 4 : 3)}`,
-    );
-  }
+  const tokenParts: string[] = [];
+  if (snapshot.inputTokens)
+    tokenParts.push(`↑${formatNumber(snapshot.inputTokens)}`);
+  if (snapshot.outputTokens)
+    tokenParts.push(`↓${formatNumber(snapshot.outputTokens)}`);
+  if (tokenParts.length) parts.push(tokenParts.join(" "));
+
   if (
     typeof snapshot.cacheHitRate === "number" &&
     !Number.isNaN(snapshot.cacheHitRate)
   ) {
-    costParts.push(`CH${snapshot.cacheHitRate.toFixed(1)}%`);
+    parts.push(`CH${snapshot.cacheHitRate.toFixed(1)}%`);
   }
-  if (costParts.length) parts.push(costParts.join(" "));
+
+  if (typeof snapshot.sessionCost === "number" && snapshot.sessionCost > 0) {
+    parts.push(
+      `$${snapshot.sessionCost.toFixed(snapshot.sessionCost < 0.01 ? 4 : 3)}`,
+    );
+  }
 
   return parts.join(` ${styles.dim("·")} `);
+}
+
+export function formatModelStatus(
+  snapshot: StatusSnapshot,
+  styles: StatuslineStyles = DEFAULT_STYLES,
+): string {
+  const parts: string[] = [];
+  if (snapshot.provider) parts.push(styles.dim(`(${snapshot.provider})`));
+
+  const model = compactModel(snapshot.model);
+  if (model) parts.push(styles.accent(model));
+  if (!parts.length) return "";
+
+  const thinking =
+    !snapshot.thinkingLevel || snapshot.thinkingLevel === "off"
+      ? "thinking off"
+      : snapshot.thinkingLevel;
+  return `${parts.join(" ")} ${styles.dim(`• ${thinking}`)}`;
 }
 
 export function formatQuotaLine(
@@ -98,16 +116,6 @@ export function formatQuotaLine(
 function compactModel(model: string | undefined): string | undefined {
   if (!model) return undefined;
   return model.replace(/^models\//, "");
-}
-
-function formatModelPart(
-  modelPart: string,
-  thinkingLevel: string | undefined,
-  styles: StatuslineStyles,
-): string {
-  const colored = styles.accent(modelPart);
-  if (!thinkingLevel || thinkingLevel === "off") return colored;
-  return `${colored} ${styles.dim(`(${thinkingLevel})`)}`;
 }
 
 function formatContext(

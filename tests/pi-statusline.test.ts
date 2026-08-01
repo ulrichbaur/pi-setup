@@ -14,8 +14,9 @@ import {
   saveConfig,
 } from "../extensions/pi-statusline/config.ts";
 import {
+  formatModelStatus,
   formatQuotaLine,
-  formatStatusline,
+  formatStatusStats,
 } from "../extensions/pi-statusline/format.ts";
 import { commitStatuslineChanges } from "../extensions/pi-statusline/menu.ts";
 import { withQuotaCache } from "../extensions/pi-statusline/quota/cache.ts";
@@ -34,27 +35,31 @@ const quota = (overrides: Partial<QuotaStatus> = {}): QuotaStatus => ({
   ...overrides,
 });
 
-test("formats the status summary from model, context, cost, and cache usage", () => {
-  const line = stripAnsi(
-    formatStatusline({
-      provider: "anthropic",
-      model: "models/claude-sonnet",
-      thinkingLevel: "high",
-      context: { tokens: 25_000, maxTokens: 100_000 },
-      sessionCost: 1.2345,
-      cacheHitRate: 80,
-    }),
-  );
+test("formats default-like stats and right-aligned model details", () => {
+  const snapshot = {
+    provider: "anthropic",
+    model: "models/claude-sonnet",
+    thinkingLevel: "high",
+    inputTokens: 125_000,
+    outputTokens: 8_200,
+    context: { tokens: 25_000, maxTokens: 100_000 },
+    sessionCost: 1.2345,
+    cacheHitRate: 80,
+  };
 
   assert.equal(
-    line,
-    "anthropic/claude-sonnet (high) · 25.0%/100k · $1.234 CH80.0%",
+    stripAnsi(formatStatusStats(snapshot)),
+    "25.0%/100k · ↑125k ↓8.2k · CH80.0% · $1.234",
   );
   assert.equal(
-    stripAnsi(formatStatusline({ context: { tokens: 999 } })),
+    stripAnsi(formatModelStatus(snapshot)),
+    "(anthropic) claude-sonnet • high",
+  );
+  assert.equal(
+    stripAnsi(formatStatusStats({ context: { tokens: 999 } })),
     "999",
   );
-  assert.equal(formatStatusline({ sessionCost: 0 }), "");
+  assert.equal(formatStatusStats({ sessionCost: 0 }), "");
 });
 
 test("formats quota windows, stale data, and errors", () => {
