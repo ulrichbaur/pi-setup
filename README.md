@@ -24,25 +24,23 @@ Preferences are stored in `~/.pi/agent/model-effort.json` (or below
 `PI_CODING_AGENT_DIR` when set). The file is created with user-only permissions.
 Delete it to reset all saved levels.
 
-### Skill palette
+### Skillset
 
-`extensions/skill-palette/` provides `/skill`, a searchable picker that queues a
-skill for the next message. Unlike `pi-skill-palette`, it reads Pi's effective
-loaded skill collection, so package `skills` filters in `settings.json` are
-respected. The injected skill block uses the same format as Pi's native
-`/skill:name` expansion.
+`extensions/skillset/` combines three independently registered skill tools:
+
+- `/skill` opens a searchable picker and queues a skill for the next message.
+  It reads Pi's effective loaded skill collection, so package `skills` filters
+  in `settings.json` are respected. Results currently sort alphabetically.
+- `/skill-policy` controls which loaded skills the model may see and invoke
+  automatically. Skills remain available through manual `/skill:name` commands.
+  The policy is fail-closed: no skills are exposed by default, and a malformed
+  policy also hides all skills.
+- `/usage` opens a read-only survey of skill usage reconstructed from Pi session
+  logs, including all-time per-skill and per-project counts plus 7/14/30/90-day
+  trends. Session analysis failures are reported without disabling other tools.
 
 Remove `npm:pi-skill-palette` from `settings.json` before enabling this
 extension; otherwise Pi disambiguates the duplicate `/skill` commands.
-
-### Skill policy
-
-`extensions/skill-policy/` controls which installed skills the model may see
-and invoke automatically. Skills remain available through manual `/skill:name`
-commands. The default is fail-closed: no skills are exposed automatically, and
-a malformed policy also hides all skills.
-
-Run `/skill-policy` inside Pi to open the interactive allowlist editor.
 
 The allowlist is stored in `skill-policy.json` below `PI_CODING_AGENT_DIR`, or
 in `~/.pi/agent/skill-policy.json` when that variable is unset, with user-only

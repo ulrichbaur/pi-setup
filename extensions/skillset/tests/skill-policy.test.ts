@@ -82,9 +82,12 @@ function fakePi(options: { mode?: string; menuInputs?: string[][] } = {}) {
   skillPolicy(pi as any);
   return {
     command: (args: string) => commandHandler!(args, context),
-    filter: () =>
+    filter: (prompt: string = systemPrompt) =>
       beforeAgentStart!(
-        { systemPrompt, systemPromptOptions: context.getSystemPromptOptions() },
+        {
+          systemPrompt: prompt,
+          systemPromptOptions: context.getSystemPromptOptions(),
+        },
         context,
       ),
     notifications,
@@ -110,7 +113,7 @@ test("the interactive editor saves a private policy used by sessions", async () 
   await rm(agentDirectory, { recursive: true, force: true });
   const fake = fakePi({
     mode: "tui",
-    menuInputs: [["\r"], ["\x1b[B", "\x1b[B", "\x1b[B", "\r"]],
+    menuInputs: [["\r", "\x1b"]],
   });
 
   await fake.command("");
@@ -125,11 +128,57 @@ test("the interactive editor saves a private policy used by sessions", async () 
   assert.match(fake.notifications[0][0], /Saved skill policy/);
 });
 
+test("warns once per session when loaded skills have no recognizable prompt block", async () => {
+  const fake = fakePi();
+  const broken = "Before\n<skills>alpha</skills>\nAfter";
+
+  const stderr: string[] = [];
+  const originalConsoleError = console.error;
+  console.error = (message: string) => stderr.push(message);
+  try {
+    const result = await fake.filter(broken);
+
+    // Headless runs have a no-op notify; the error must reach stderr too.
+    assert.equal(stderr.length, 1);
+    assert.match(stderr[0]!, /no <available_skills> block was found/);
+
+    // Fail closed: the original prompt stays, an in-band countermand is added.
+    assert.match(result.systemPrompt, /<skills>alpha<\/skills>/);
+    assert.match(result.systemPrompt, /Do not invoke any skill on your own/);
+    assert.match(
+      fake.notifications[0][0],
+      /no <available_skills> block was found/,
+    );
+    assert.match(fake.notifications[0][0], /auto-invocation is disabled/);
+    assert.equal(fake.notifications[0][1], "error");
+
+    // Repeated broken prompts stay quiet but keep the countermand;
+    // a recovery re-arms the warning.
+    const repeat = await fake.filter(broken);
+    assert.match(repeat.systemPrompt, /Do not invoke any skill on your own/);
+    assert.equal(fake.notifications.length, 1);
+    await fake.filter();
+    await fake.filter(broken);
+    assert.equal(fake.notifications.length, 2);
+    assert.equal(stderr.length, 2);
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
 test("malformed policy fails closed and notifies the user", async () => {
   await writeFile(policyFile, JSON.stringify({ allowAutoInvocation: "alpha" }));
   const fake = fakePi();
 
-  const result = await fake.filter();
+  const stderr: string[] = [];
+  const originalConsoleError = console.error;
+  console.error = (message: string) => stderr.push(message);
+  let result: any;
+  try {
+    result = await fake.filter();
+  } finally {
+    console.error = originalConsoleError;
+  }
 
   assert.equal(result.systemPrompt, "Before\nAfter");
   assert.match(
@@ -137,4 +186,27 @@ test("malformed policy fails closed and notifies the user", async () => {
     /allowAutoInvocation must be an array/,
   );
   assert.equal(fake.notifications[0][1], "error");
+  assert.equal(stderr.length, 1);
+  assert.match(stderr[0]!, /allowAutoInvocation must be an array/);
+});
+
+test("allowed skills that are no longer loaded stay editable in the menu", async () => {
+  await writeFile(
+    policyFile,
+    JSON.stringify({ allowAutoInvocation: ["ghost"] }),
+  );
+  const arrowDown = `${String.fromCharCode(27)}[B`;
+  // The menu lists loaded skills first (alpha, beta), then orphaned
+  // allowlist entries; two downs reach ghost, enter revokes it.
+  const fake = fakePi({
+    mode: "tui",
+    menuInputs: [[arrowDown, arrowDown, "\r", String.fromCharCode(27)]],
+  });
+
+  await fake.command("");
+
+  assert.deepEqual(JSON.parse(await readFile(policyFile, "utf8")), {
+    allowAutoInvocation: [],
+  });
+  assert.match(fake.notifications[0][0], /Saved skill policy/);
 });

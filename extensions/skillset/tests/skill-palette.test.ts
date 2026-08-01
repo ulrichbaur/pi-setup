@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
-import type { Skill } from "@earendil-works/pi-coding-agent";
-import skillPalette, {
-  buildSkillBlock,
-} from "../palette/palette.ts";
-import { showSkillPalette } from "../palette/palette-menu.ts";
+import { after, test } from "node:test";
+
+// Isolate session-history scanning from the developer's real agent state.
+const home = await mkdtemp(join(tmpdir(), "skill-palette-test-"));
+process.env.HOME = home;
+process.env.PI_CODING_AGENT_DIR = join(home, ".pi", "agent");
+
+const { default: skillPalette, orderSkillsByUsage } = await import(
+  "../palette/palette.ts"
+);
+const { showSkillPalette } = await import("../palette/palette-menu.ts");
+type Skill = Parameters<typeof showSkillPalette>[0][number];
+
+after(async () => {
+  await rm(home, { recursive: true, force: true });
+});
 
 function matchesBinding(data: string, binding: string): boolean {
   const keys: Record<string, string[]> = {
@@ -30,24 +40,6 @@ function makeSkill(name: string, filePath: string): Skill {
   } as Skill;
 }
 
-test("formats the selected skill like Pi's native expansion", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "skill-palette-"));
-  const filePath = join(directory, "SKILL.md");
-  await writeFile(
-    filePath,
-    "---\nname: filtered\ndescription: test\n---\n\n# Instructions\nDo it.\n",
-  );
-
-  try {
-    assert.equal(
-      await buildSkillBlock(makeSkill("filtered", filePath)),
-      `<skill name="filtered" location="${filePath}">\nReferences are relative to ${directory}.\n\n# Instructions\nDo it.\n</skill>`,
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
 test("typing in the palette filters skill names and descriptions", async () => {
   const alpha = makeSkill("alpha", "/tmp/alpha.md");
   alpha.description = "frontend deployment";
@@ -55,7 +47,7 @@ test("typing in the palette filters skill names and descriptions", async () => {
   beta.description = "database migration";
   let filteredRender = "";
 
-  const selected = await showSkillPalette([alpha, beta], null, {
+  const selected = await showSkillPalette([alpha, beta], {
     ui: {
       custom: (build: any) =>
         new Promise((resolve) => {
@@ -82,64 +74,201 @@ test("typing in the palette filters skill names and descriptions", async () => {
   assert.doesNotMatch(filteredRender, /alpha/);
 });
 
-test("the palette only offers skills in Pi's filtered loaded list", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "skill-palette-"));
-  const allowedPath = join(directory, "allowed.md");
-  await writeFile(
-    allowedPath,
-    "---\ndescription: allowed\n---\nAllowed body\n",
-  );
-  const allowed = makeSkill("allowed", allowedPath);
+test("usage rows order the palette while unknown names are dropped", () => {
+  const alpha = makeSkill("alpha", "/tmp/alpha.md");
+  const beta = makeSkill("beta", "/tmp/beta.md");
 
+  const ordered = orderSkillsByUsage(
+    [alpha, beta],
+    [{ skillName: "beta" }, { skillName: "removed" }, { skillName: "alpha" }],
+  );
+
+  assert.deepEqual(
+    ordered.map((skill) => skill.name),
+    ["beta", "alpha"],
+  );
+});
+
+test("the palette prefills Pi's native skill command", async () => {
+  const allowed = makeSkill("allowed", "/tmp/allowed/SKILL.md");
   let command: ((args: string, ctx: any) => Promise<void>) | undefined;
-  let beforeStart: ((event: any, ctx: any) => Promise<any>) | undefined;
-  let rendered = "";
-  const notifications: unknown[][] = [];
+  let editorText = "";
   const context = {
     mode: "tui",
     getSystemPromptOptions: () => ({ skills: [allowed] }),
     ui: {
-      notify: (...args: unknown[]) => notifications.push(args),
-      setStatus() {},
-      setWidget() {},
+      notify() {},
+      setEditorText: (text: string) => {
+        editorText = text;
+      },
       custom: (build: any) =>
         new Promise((resolve) => {
-          const theme = {
-            fg: (_color: string, text: string) => text,
-            bold: (text: string) => text,
-          };
           const component = build(
             { requestRender() {} },
-            theme,
+            {
+              fg: (_color: string, text: string) => text,
+              bold: (text: string) => text,
+            },
             { matches: matchesBinding },
             resolve,
           );
-          rendered = component.render(100).join("\n");
           component.handleInput("\r");
         }),
     },
   };
   const pi = {
-    registerMessageRenderer() {},
     registerCommand(_name: string, value: any) {
       command = value.handler;
     },
-    on(name: string, handler: any) {
-      if (name === "before_agent_start") beforeStart = handler;
-    },
+    on() {},
   };
 
-  try {
-    skillPalette(pi as any);
-    await command!("", context);
-    const result = await beforeStart!({}, context);
+  skillPalette(pi as any);
+  await command!("", context);
 
-    assert.match(rendered, /allowed/);
-    assert.doesNotMatch(rendered, /unfiltered/);
-    assert.match(result.message.content, /<skill name="allowed"/);
-    assert.match(result.message.content, /Allowed body/);
-    assert.deepEqual(notifications[0], ["Skill queued: allowed", "info"]);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  assert.equal(editorText, "/skill:allowed ");
+});
+
+test("usage history orders the palette by frecency before it opens", async () => {
+  const sessionDirectory = join(home, ".pi", "agent", "sessions", "--proj--");
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir(sessionDirectory, { recursive: true });
+  await writeFile(
+    join(sessionDirectory, "history.jsonl"),
+    `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "history",
+      timestamp: "2026-07-01T00:00:00Z",
+      cwd: "/proj",
+    })}\n${JSON.stringify({
+      type: "message",
+      id: "h1",
+      parentId: null,
+      timestamp: "2026-07-01T00:00:00Z",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: '<skill name="beta" location="/tmp/beta.md">body</skill>',
+          },
+        ],
+      },
+    })}\n`,
+  );
+
+  const alpha = makeSkill("alpha", "/tmp/alpha.md");
+  const beta = makeSkill("beta", "/tmp/beta.md");
+  let command: ((args: string, ctx: any) => Promise<void>) | undefined;
+  let editorText = "";
+  let initialRender: string[] = [];
+  const context = {
+    mode: "tui",
+    getSystemPromptOptions: () => ({ skills: [alpha, beta] }),
+    ui: {
+      notify() {},
+      setEditorText: (text: string) => {
+        editorText = text;
+      },
+      custom: (build: any) =>
+        new Promise((resolve) => {
+          const component = build(
+            { requestRender() {} },
+            {
+              fg: (_color: string, text: string) => text,
+              bold: (text: string) => text,
+            },
+            { matches: matchesBinding },
+            resolve,
+          );
+          initialRender = component.render(100);
+          component.handleInput("\r");
+        }),
+    },
+  };
+  const pi = {
+    registerCommand(_name: string, value: any) {
+      command = value.handler;
+    },
+    on() {},
+  };
+
+  skillPalette(pi as any);
+  await command!("", context);
+
+  const rendered = initialRender.join("\n");
+  const betaIndex = rendered.indexOf("beta");
+  const alphaIndex = rendered.indexOf("alpha");
+  assert.ok(betaIndex >= 0 && alphaIndex >= 0);
+  assert.ok(betaIndex < alphaIndex, "invoked skill should be listed first");
+  assert.equal(editorText, "/skill:beta ");
+});
+
+test("a hanging history scan cannot delay the palette beyond its timeout", {
+  timeout: 2000,
+}, async () => {
+  const { orderSkillsByFrecency } = await import("../palette/palette.ts");
+  const alpha = makeSkill("alpha", "/tmp/alpha.md");
+  const beta = makeSkill("beta", "/tmp/beta.md");
+
+  const ordered = await orderSkillsByFrecency(
+    [alpha, beta],
+    () => new Promise(() => {}),
+  );
+
+  assert.deepEqual(
+    ordered.map((skill) => skill.name),
+    ["alpha", "beta"],
+  );
+});
+
+test("a timed-out scan reuses the order of the last completed scan", {
+  timeout: 2000,
+}, async () => {
+  const { orderSkillsByFrecency } = await import("../palette/palette.ts");
+  const alpha = makeSkill("alpha", "/tmp/alpha.md");
+  const beta = makeSkill("beta", "/tmp/beta.md");
+  const skills = [alpha, beta];
+  const cache = {};
+
+  const events = [
+    {
+      skillName: "beta",
+      project: "/proj",
+      timestamp: Date.now(),
+      sourceId: "b1",
+    },
+  ];
+  await orderSkillsByFrecency(
+    skills,
+    () => Promise.resolve({ events, errors: [] }),
+    cache,
+  );
+
+  const ordered = await orderSkillsByFrecency(
+    skills,
+    () => new Promise(() => {}),
+    cache,
+  );
+
+  assert.deepEqual(
+    ordered.map((skill) => skill.name),
+    ["beta", "alpha"],
+  );
+});
+
+test("a failing history scan falls back to the given skill order", async () => {
+  const { orderSkillsByFrecency } = await import("../palette/palette.ts");
+  const alpha = makeSkill("alpha", "/tmp/alpha.md");
+  const beta = makeSkill("beta", "/tmp/beta.md");
+
+  const ordered = await orderSkillsByFrecency([alpha, beta], () =>
+    Promise.reject(new Error("history scan broke")),
+  );
+
+  assert.deepEqual(
+    ordered.map((skill) => skill.name),
+    ["alpha", "beta"],
+  );
 });

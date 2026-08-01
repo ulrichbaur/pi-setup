@@ -11,31 +11,18 @@ import {
   Text,
 } from "@earendil-works/pi-tui";
 
-const CLEAR_VALUE = "\0clear";
-
-/** Shows Pi's effective skill list and returns the skill to queue. */
+/** Shows Pi's effective skill list and returns the selected skill. */
 export async function showSkillPalette(
   skills: Skill[],
-  queuedSkill: Skill | null,
   ctx: ExtensionContext,
-): Promise<Skill | null | undefined> {
+): Promise<Skill | undefined> {
   return ctx.ui.custom((tui, theme, keybindings, done) => {
     const byName = new Map(skills.map((skill) => [skill.name, skill]));
     const items: SelectItem[] = skills.map((skill) => ({
       value: skill.name,
       label: skill.name,
-      description:
-        skill.name === queuedSkill?.name
-          ? `queued · ${skill.description}`
-          : skill.description,
+      description: skill.description,
     }));
-    if (queuedSkill) {
-      items.unshift({
-        value: CLEAR_VALUE,
-        label: `Unqueue ${queuedSkill.name}`,
-        description: "clear the skill queued for the next message",
-      });
-    }
 
     const container = new Container();
     container.addChild(
@@ -48,7 +35,7 @@ export async function showSkillPalette(
       new Text(
         theme.fg(
           "dim",
-          "type to filter • ↑↓ navigate • enter queue • esc cancel",
+          "type to filter • ↑↓ navigate • enter select • esc cancel",
         ),
         1,
         0,
@@ -70,8 +57,7 @@ export async function showSkillPalette(
           noMatch: (text) => theme.fg("warning", text),
         },
       );
-      nextList.onSelect = (item) =>
-        done(item.value === CLEAR_VALUE ? null : byName.get(item.value));
+      nextList.onSelect = (item) => done(byName.get(item.value));
       nextList.onCancel = () => done(undefined);
       return nextList;
     };

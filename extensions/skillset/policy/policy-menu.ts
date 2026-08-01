@@ -6,8 +6,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   Container,
-  type SelectItem,
-  SelectList,
+  type SettingItem,
+  SettingsList,
   Text,
 } from "@earendil-works/pi-tui";
 
@@ -17,70 +17,24 @@ export type SkillMenuItem = {
   loaded: boolean;
 };
 
-type MenuAction =
-  | { kind: "toggle"; name: string }
-  | { kind: "clear" }
-  | { kind: "save" }
-  | { kind: "discard" };
-
-/** Resolves with a working allowlist on save, or null when discarded. */
+/** Resolves with the displayed allowlist when the editor closes. */
 export async function showSkillPolicyMenu(
   skills: SkillMenuItem[],
   initialAllowed: ReadonlySet<string>,
   ctx: ExtensionContext,
-): Promise<Set<string> | null> {
+): Promise<Set<string>> {
   const allowed = new Set(initialAllowed);
 
-  while (true) {
-    const action = await showMenu(skills, allowed, ctx);
-    if (action.kind === "toggle") {
-      if (allowed.has(action.name)) allowed.delete(action.name);
-      else allowed.add(action.name);
-    } else if (action.kind === "clear") {
-      allowed.clear();
-    } else if (action.kind === "save") {
-      return allowed;
-    } else {
-      return null;
-    }
-  }
-}
-
-async function showMenu(
-  skills: SkillMenuItem[],
-  allowed: ReadonlySet<string>,
-  ctx: ExtensionContext,
-): Promise<MenuAction> {
-  return ctx.ui.custom((tui, theme, _keybindings, done) => {
-    const skillItems: SelectItem[] = skills.map((skill) => {
-      const status = allowed.has(skill.name) ? "auto-allowed" : "manual-only";
-      const details = skill.loaded
+  await ctx.ui.custom((tui, theme, _keybindings, done) => {
+    const items: SettingItem[] = skills.map((skill) => ({
+      id: skill.name,
+      label: skill.name,
+      description: skill.loaded
         ? skill.description
-        : "configured but not currently loaded";
-      return {
-        value: `skill:${skill.name}`,
-        label: skill.name,
-        description: details ? `${status} · ${details}` : status,
-      };
-    });
-    const items: SelectItem[] = [
-      ...skillItems,
-      {
-        value: "clear",
-        label: "Make all manual-only",
-        description: `${allowed.size} currently auto-allowed`,
-      },
-      {
-        value: "save",
-        label: "Save & exit",
-        description: "persist the displayed policy",
-      },
-      {
-        value: "discard",
-        label: "Discard & exit",
-        description: "close without saving",
-      },
-    ];
+        : "configured but not currently loaded",
+      currentValue: allowed.has(skill.name) ? "auto-allowed" : "manual-only",
+      values: ["auto-allowed", "manual-only"],
+    }));
 
     const container = new Container();
     container.addChild(
@@ -89,47 +43,39 @@ async function showMenu(
     container.addChild(
       new Text(theme.fg("accent", theme.bold("Skill policy")), 1, 0),
     );
-    container.addChild(
-      new Text(
-        theme.fg(
-          "dim",
-          "select a skill to toggle • enter select • esc discards",
-        ),
-        1,
-        0,
-      ),
-    );
 
-    const list = new SelectList(items, Math.min(items.length, 15), {
-      selectedPrefix: (text) => theme.fg("accent", text),
-      selectedText: (text) => theme.fg("accent", text),
-      description: (text) => theme.fg("muted", text),
-      scrollInfo: (text) => theme.fg("dim", text),
-      noMatch: (text) => theme.fg("warning", text),
-    });
-    list.onSelect = (item) => done(actionFor(item.value));
-    list.onCancel = () => done({ kind: "discard" });
+    const list = new SettingsList(
+      items,
+      Math.min(items.length + 2, 15),
+      {
+        label: (text, selected) => (selected ? theme.fg("accent", text) : text),
+        value: (text, selected) =>
+          theme.fg(selected ? "accent" : "muted", text),
+        description: (text) => theme.fg("dim", text),
+        cursor: theme.fg("accent", "→ "),
+        hint: (text) => theme.fg("dim", text),
+      },
+      (name, value) => {
+        if (value === "auto-allowed") allowed.add(name);
+        else allowed.delete(name);
+      },
+      () => done(undefined),
+      { enableSearch: true },
+    );
     container.addChild(list);
     container.addChild(
       new DynamicBorder((text: string) => theme.fg("accent", text)),
     );
 
     return {
-      render: (width) => container.render(width),
+      render: (width: number) => container.render(width),
       invalidate: () => container.invalidate(),
-      handleInput: (data) => {
+      handleInput: (data: string) => {
         list.handleInput(data);
         tui.requestRender();
       },
     };
   });
-}
 
-function actionFor(value: string): MenuAction {
-  if (value.startsWith("skill:")) {
-    return { kind: "toggle", name: value.slice("skill:".length) };
-  }
-  if (value === "clear") return { kind: "clear" };
-  if (value === "save") return { kind: "save" };
-  return { kind: "discard" };
+  return allowed;
 }
