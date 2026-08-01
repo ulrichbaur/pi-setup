@@ -6,8 +6,8 @@ import { test } from "node:test";
 import type { Skill } from "@earendil-works/pi-coding-agent";
 import skillPalette, {
   buildSkillBlock,
-} from "../extensions/skill-palette/index.ts";
-import { showSkillPalette } from "../extensions/skill-palette/menu.ts";
+} from "../palette/palette.ts";
+import { showSkillPalette } from "../palette/palette-menu.ts";
 
 function matchesBinding(data: string, binding: string): boolean {
   const keys: Record<string, string[]> = {

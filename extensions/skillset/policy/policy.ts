@@ -7,14 +7,15 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type SkillMenuItem, showSkillPolicyMenu } from "./menu.ts";
+import { getLoadedSkills } from "../core.ts";
+import { type SkillMenuItem, showSkillPolicyMenu } from "./policy-menu.ts";
 
-type SkillPolicyConfig = {
+export type SkillPolicyConfig = {
   /** Skills the model may see in <available_skills> and auto-invoke. */
   allowAutoInvocation?: string[];
 };
 
-type SkillPolicy = {
+export type SkillPolicy = {
   allowAutoInvocation: Set<string>;
 };
 
@@ -29,27 +30,37 @@ function emptyPolicy(): SkillPolicy {
   };
 }
 
-// Loads and validates the persisted allowlist.
-async function loadPolicy(): Promise<SkillPolicy> {
-  const policy = emptyPolicy();
-  if (!existsSync(CONFIG_PATH)) return policy;
+/** Validates untrusted persisted data and creates an invocation policy. */
+export function parseSkillPolicyConfig(
+  value: unknown,
+  source = "skill policy",
+): SkillPolicy {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${source}: config must be an object`);
+  }
 
-  const raw = await readFile(CONFIG_PATH, "utf8");
-  const parsed = JSON.parse(raw) as SkillPolicyConfig;
-
+  const config = value as SkillPolicyConfig;
   if (
-    parsed.allowAutoInvocation &&
-    !Array.isArray(parsed.allowAutoInvocation)
+    config.allowAutoInvocation !== undefined &&
+    (!Array.isArray(config.allowAutoInvocation) ||
+      config.allowAutoInvocation.some((name) => typeof name !== "string"))
   ) {
     throw new Error(
-      `${CONFIG_PATH}: allowAutoInvocation must be an array of skill names`,
+      `${source}: allowAutoInvocation must be an array of skill names`,
     );
   }
-  for (const name of parsed.allowAutoInvocation ?? []) {
-    policy.allowAutoInvocation.add(name);
-  }
 
-  return policy;
+  return {
+    allowAutoInvocation: new Set(config.allowAutoInvocation ?? []),
+  };
+}
+
+// Loads and validates the persisted allowlist.
+async function loadPolicy(): Promise<SkillPolicy> {
+  if (!existsSync(CONFIG_PATH)) return emptyPolicy();
+
+  const raw = await readFile(CONFIG_PATH, "utf8");
+  return parseSkillPolicyConfig(JSON.parse(raw), CONFIG_PATH);
 }
 
 // Persists a stable, sorted allowlist atomically with user-only permissions.
@@ -67,7 +78,7 @@ async function savePolicy(policy: SkillPolicy): Promise<void> {
 }
 
 // Hiding skills here prevents auto-invocation without disabling manual /skill:name commands.
-function filterAvailableSkills(
+export function filterAvailableSkills(
   systemPrompt: string,
   policy: SkillPolicy,
 ): string {
@@ -99,9 +110,7 @@ export default function skillPolicy(pi: ExtensionAPI) {
 
       try {
         const policy = await loadPolicy();
-        const loadedSkills = [
-          ...(ctx.getSystemPromptOptions().skills ?? []),
-        ].sort((left, right) => left.name.localeCompare(right.name));
+        const loadedSkills = getLoadedSkills(ctx);
         const loaded = new Set(loadedSkills.map((skill) => skill.name));
         const menuSkills: SkillMenuItem[] = loadedSkills.map((skill) => ({
           name: skill.name,

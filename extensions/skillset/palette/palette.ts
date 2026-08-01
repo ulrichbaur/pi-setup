@@ -5,9 +5,8 @@ import {
   stripFrontmatter,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
-import { showSkillPalette } from "./menu.ts";
-
-let queuedSkill: Skill | null = null;
+import { getLoadedSkills } from "../core.ts";
+import { showSkillPalette } from "./palette-menu.ts";
 
 /** Formats a loaded skill exactly like Pi's native /skill:name expansion. */
 export async function buildSkillBlock(skill: Skill): Promise<string> {
@@ -27,6 +26,10 @@ function clearIndicators(ctx: {
 }
 
 export default function skillPalette(pi: ExtensionAPI): void {
+  // Session-scoped state must belong to this extension instance so reloads and
+  // session replacement cannot retain a queued skill through module caching.
+  let queuedSkill: Skill | null = null;
+
   pi.registerMessageRenderer("skill-palette", (message, options, theme) => {
     const content = typeof message.content === "string" ? message.content : "";
     const name = content.match(/<skill name="([^"]+)"/)?.[1] ?? "skill";
@@ -65,9 +68,7 @@ export default function skillPalette(pi: ExtensionAPI): void {
 
       // This is Pi's post-discovery skill collection. In particular, package
       // filters from settings.json have already been applied to this list.
-      const skills = [...(ctx.getSystemPromptOptions().skills ?? [])].sort(
-        (left, right) => left.name.localeCompare(right.name),
-      );
+      const skills = getLoadedSkills(ctx);
       if (skills.length === 0) {
         ctx.ui.notify("No skills are loaded", "warning");
         return;

@@ -5,7 +5,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   Container,
-  type Focusable,
   Input,
   type SelectItem,
   SelectList,
@@ -85,12 +84,13 @@ export async function showSkillPalette(
       new DynamicBorder((text: string) => theme.fg("accent", text)),
     );
 
-    const component: Focusable & {
-      render(width: number): string[];
-      invalidate(): void;
-      handleInput(data: string): void;
-    } = {
-      focused: false,
+    return {
+      get focused() {
+        return search.focused;
+      },
+      set focused(focused: boolean) {
+        search.focused = focused;
+      },
       render: (width: number) => container.render(width),
       invalidate: () => container.invalidate(),
       handleInput: (data: string) => {
@@ -115,12 +115,5 @@ export async function showSkillPalette(
         tui.requestRender();
       },
     };
-    Object.defineProperty(component, "focused", {
-      get: () => search.focused,
-      set: (focused: boolean) => {
-        search.focused = focused;
-      },
-    });
-    return component;
   });
 }

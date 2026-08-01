@@ -17,8 +17,8 @@ const policyFile = join(agentDirectory, "skill-policy.json");
 process.env.HOME = home;
 process.env.PI_CODING_AGENT_DIR = agentDirectory;
 
-const { default: skillPolicy } = await import(
-  "../extensions/skill-policy/index.ts"
+const { default: skillPolicy, parseSkillPolicyConfig } = await import(
+  "../policy/policy.ts"
 );
 
 beforeEach(async () => {
@@ -90,6 +90,13 @@ function fakePi(options: { mode?: string; menuInputs?: string[][] } = {}) {
     notifications,
   };
 }
+
+test("policy config parsing rejects non-string allowlist entries", () => {
+  assert.throws(
+    () => parseSkillPolicyConfig({ allowAutoInvocation: ["alpha", 7] }),
+    /allowAutoInvocation must be an array of skill names/,
+  );
+});
 
 test("hides every skill by default while preserving the rest of the prompt", async () => {
   const fake = fakePi();

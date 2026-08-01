@@ -12,7 +12,7 @@
     "fmt": "biome format --write .",
     "fmt-check": "biome format .",
     "lint": "biome check .",
-    "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "test": "node --test --experimental-strip-types tests/*.test.ts extensions/*/tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
