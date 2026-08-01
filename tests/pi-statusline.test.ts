@@ -174,6 +174,30 @@ test("statusline installs one footer, rerenders, and restores it on shutdown", a
   assert.equal(footerCalls.at(-1), undefined);
 });
 
+test("statusline installs its footer before quota I/O completes", async () => {
+  const footerCalls: unknown[] = [];
+  let resolveQuota!: (status: QuotaStatus) => void;
+  const pendingQuota = new Promise<QuotaStatus>((resolve) => {
+    resolveQuota = resolve;
+  });
+  const adapter: QuotaAdapter = {
+    provider: "codex",
+    getQuota: () => pendingQuota,
+  };
+  const runtime = createStatuslineRuntime(
+    { getThinkingLevel: () => "off" } as ExtensionAPI,
+    [adapter],
+  );
+
+  const update = runtime.update(
+    makeContext("tui", { setFooter: (value) => footerCalls.push(value) }),
+  );
+  assert.equal(footerCalls.length, 1);
+
+  resolveQuota(quota());
+  await update;
+});
+
 test("statusline is inert outside TUI mode", async () => {
   let footerCalls = 0;
   let quotaCalls = 0;

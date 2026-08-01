@@ -75,19 +75,23 @@ export function createStatuslineRuntime(
     if (!ctx.hasUI || ctx.mode !== "tui") return;
 
     const provider = ctx.model?.provider;
+
+    // Replace Pi's default footer immediately; quota I/O must not block the
+    // statusline's model, context, and session details from becoming visible.
+    latestSnapshot = createStatusSnapshot(pi, ctx, {
+      quota: provider ? lastQuotaByProvider.get(provider) : undefined,
+    });
+    installFooter(ctx);
+    requestRender?.();
+
     const quota = await resolveQuota(ctx, adapters).catch(() => undefined);
     // Keep the last usable reading visible while a refresh is temporarily unavailable.
     if (quota && provider && (quota.windows.length > 0 || quota.error)) {
       lastQuotaByProvider.set(provider, quota);
     }
+    if (!quota) return;
 
-    const snapshot = createStatusSnapshot(pi, ctx, {
-      quota:
-        quota ?? (provider ? lastQuotaByProvider.get(provider) : undefined),
-    });
-
-    latestSnapshot = snapshot;
-    installFooter(ctx);
+    latestSnapshot = createStatusSnapshot(pi, ctx, { quota });
     requestRender?.();
   }
 
