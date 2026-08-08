@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import type {
@@ -17,11 +16,11 @@ import {
   parseOpenCodeGoHtml,
 } from "../extensions/pi-statusline/quota/opencode-go.ts";
 import { createStatusSnapshot } from "../extensions/pi-statusline/statusline.ts";
+import { withTempDir } from "./helpers.ts";
 
-test("loads the OpenCode Go cookie only from its dedicated auth file", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pi-statusline-auth-"));
-  const authFile = join(directory, "pi-statusline.auth.json");
-  try {
+test("loads the OpenCode Go cookie only from its dedicated auth file", () =>
+  withTempDir("pi-statusline-auth-", async (directory) => {
+    const authFile = join(directory, "pi-statusline.auth.json");
     await writeFile(
       authFile,
       JSON.stringify({ opencodeGo: { authCookie: " cookie-value " } }),
@@ -31,15 +30,11 @@ test("loads the OpenCode Go cookie only from its dedicated auth file", async () 
       await loadOpenCodeGoAuthCookie(join(directory, "missing.json")),
       undefined,
     );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+  }));
 
-test("saves the OpenCode Go cookie without replacing other auth fields", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pi-statusline-auth-"));
-  const authFile = join(directory, "pi-statusline.auth.json");
-  try {
+test("saves the OpenCode Go cookie without replacing other auth fields", () =>
+  withTempDir("pi-statusline-auth-", async (directory) => {
+    const authFile = join(directory, "pi-statusline.auth.json");
     await writeFile(
       authFile,
       JSON.stringify({
@@ -52,10 +47,7 @@ test("saves the OpenCode Go cookie without replacing other auth fields", async (
       other: { value: true },
       opencodeGo: { future: "keep", authCookie: "cookie-value" },
     });
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+  }));
 
 test("snapshot derives context, token totals, cost, and latest cache-hit rate", () => {
   const assistant = (
@@ -204,7 +196,7 @@ test("OpenCode Go adapter distinguishes parser drift from login redirect", async
     }) as Response;
   assert.equal(
     (await adapter.getQuota({}))?.error,
-    "opencode-go: no usage parsed — parser may be outdated",
+    "opencode-go: no usage parsed \u2014 parser may be outdated",
   );
 
   globalThis.fetch = async () =>

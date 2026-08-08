@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import type {
@@ -25,6 +24,7 @@ import type {
   QuotaStatus,
 } from "../extensions/pi-statusline/quota/types.ts";
 import { createStatuslineRuntime } from "../extensions/pi-statusline/statusline.ts";
+import { withTempDir } from "./helpers.ts";
 
 const stripAnsi = (value: string) =>
   value.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
@@ -103,7 +103,8 @@ test("quota cache reuses fresh values and deduplicates concurrent requests", asy
   const first = cached.getQuota({});
   const second = cached.getQuota({});
   assert.equal(calls, 1);
-  release?.(quota());
+  assert.ok(release);
+  release(quota());
   assert.equal(await first, await second);
 
   now = 1_050;
@@ -222,68 +223,62 @@ test("statusline is inert outside TUI mode", async () => {
   assert.equal(quotaCalls, 0);
 });
 
-test("saveConfig writes JSON, round-trips through loadConfig, and drops empty opencodeGo blocks", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-statusline-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const path = join(dir, "config.json");
+test("saveConfig writes JSON, round-trips through loadConfig, and drops empty opencodeGo blocks", () =>
+  withTempDir("pi-statusline-", async (dir) => {
+    const configPath = join(dir, "config.json");
+    const withWorkspace: StatuslineConfig = {
+      quotas: { codex: false, opencodeGo: true },
+      opencodeGo: { workspaceId: "ws-1" },
+    };
+    await saveConfig(withWorkspace, configPath);
+    assert.deepEqual(await loadConfig(configPath), withWorkspace);
 
-  const withWorkspace: StatuslineConfig = {
-    quotas: { codex: false, opencodeGo: true },
-    opencodeGo: { workspaceId: "ws-1" },
-  };
-  await saveConfig(withWorkspace, path);
-  assert.deepEqual(await loadConfig(path), withWorkspace);
+    await saveConfig(
+      { quotas: { codex: false, opencodeGo: true }, opencodeGo: {} },
+      configPath,
+    );
+    const raw = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(raw.opencodeGo, undefined);
+    assert.deepEqual(await loadConfig(configPath), {
+      quotas: { codex: false, opencodeGo: true },
+    });
+  }));
 
-  // Clearing the workspaceId should also drop the now-empty opencodeGo block on disk.
-  await saveConfig(
-    { quotas: { codex: false, opencodeGo: true }, opencodeGo: {} },
-    path,
-  );
-  const raw = JSON.parse(await readFile(path, "utf8"));
-  assert.equal(raw.opencodeGo, undefined);
-  // The on-disk representation omits the empty block, so loadConfig returns the same shape.
-  assert.deepEqual(await loadConfig(path), {
-    quotas: { codex: false, opencodeGo: true },
-  });
-});
+test("commitStatuslineChanges leaves auth untouched when it was not changed", () =>
+  withTempDir("pi-statusline-", async (dir) => {
+    const authPath = join(dir, "auth.json");
+    const original = '{ "opencodeGo": { "authCookie": "old" } }\n';
+    await writeFile(authPath, original);
 
-test("commitStatuslineChanges leaves auth untouched when it was not changed", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-statusline-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const authPath = join(dir, "auth.json");
-  const original = '{ "opencodeGo": { "authCookie": "old" } }\n';
-  await writeFile(authPath, original);
+    await commitStatuslineChanges({
+      config: { quotas: { codex: true, opencodeGo: false } },
+      authCookie: "replacement",
+      authCookieChanged: false,
+      configPath: join(dir, "config.json"),
+      authPath,
+    });
+    assert.equal(await readFile(authPath, "utf8"), original);
+  }));
 
-  await commitStatuslineChanges({
-    config: { quotas: { codex: true, opencodeGo: false } },
-    authCookie: "replacement",
-    authCookieChanged: false,
-    configPath: join(dir, "config.json"),
-    authPath,
-  });
-  assert.equal(await readFile(authPath, "utf8"), original);
-});
+test("commitStatuslineChanges writes to the paths in its menu state", () =>
+  withTempDir("pi-statusline-", async (dir) => {
+    const configPath = join(dir, "custom-config.json");
+    const authPath = join(dir, "custom-auth.json");
+    const config: StatuslineConfig = {
+      quotas: { codex: false, opencodeGo: true },
+    };
 
-test("commitStatuslineChanges writes to the paths in its menu state", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-statusline-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const configPath = join(dir, "custom-config.json");
-  const authPath = join(dir, "custom-auth.json");
-  const config: StatuslineConfig = {
-    quotas: { codex: false, opencodeGo: true },
-  };
+    await commitStatuslineChanges({
+      config,
+      authCookie: "secret-cookie",
+      authCookieChanged: true,
+      configPath,
+      authPath,
+    });
 
-  await commitStatuslineChanges({
-    config,
-    authCookie: "secret-cookie",
-    authCookieChanged: true,
-    configPath,
-    authPath,
-  });
-
-  assert.deepEqual(await loadConfig(configPath), config);
-  assert.equal(await loadOpenCodeGoAuthCookie(authPath), "secret-cookie");
-});
+    assert.deepEqual(await loadConfig(configPath), config);
+    assert.equal(await loadOpenCodeGoAuthCookie(authPath), "secret-cookie");
+  }));
 
 function makeContext(
   mode: "tui" | "rpc",

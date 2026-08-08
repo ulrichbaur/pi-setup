@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import type {
@@ -13,6 +12,7 @@ import saveMarkdown, {
   latestAssistantMarkdown,
   markdownTarget,
 } from "../extensions/save-md.ts";
+import { withTempDir } from "./helpers.ts";
 
 const assistant = (content: unknown): SessionEntry =>
   ({
@@ -74,23 +74,24 @@ test("markdownTarget rejects empty names and supports absolute paths", () => {
   assert.equal(markdownTarget("/tmp/project", "../answer"), "/tmp/answer.md");
 });
 
-test("/save-md writes Markdown and refuses to overwrite", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "save-md-test-"));
-  const notifications: string[] = [];
-  let command:
-    | ((args: string, ctx: ExtensionCommandContext) => Promise<void>)
-    | undefined;
+test("/save-md writes Markdown and refuses to overwrite", () =>
+  withTempDir("save-md-test-", async (directory) => {
+    const notifications: string[] = [];
+    let command:
+      | ((args: string, ctx: ExtensionCommandContext) => Promise<void>)
+      | undefined;
 
-  try {
     const registerCommand = (
-      _name: string,
+      name: string,
       definition: {
         handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
       },
     ) => {
+      assert.equal(name, "save-md");
       command = definition.handler;
     };
     saveMarkdown({ registerCommand } as unknown as ExtensionAPI);
+    assert.ok(command);
 
     const context = {
       cwd: directory,
@@ -105,18 +106,15 @@ test("/save-md writes Markdown and refuses to overwrite", async () => {
       },
     } as unknown as ExtensionCommandContext;
 
-    await command?.("notes/answer", context);
+    await command("notes/answer", context);
     assert.equal(
       await readFile(join(directory, "notes/answer.md"), "utf8"),
       "# Answer\n",
     );
 
-    await command?.("notes/answer", context);
+    await command("notes/answer", context);
     assert.match(
       notifications.at(-1) ?? "",
       /^Could not save Markdown: EEXIST: file already exists/,
     );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+  }));

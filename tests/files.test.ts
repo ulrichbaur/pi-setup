@@ -43,11 +43,7 @@ function initGitRepo(dir: string): (...args: string[]) => string {
   return git;
 }
 
-// =============================================================================
-// extractFileReferencesFromText
-// =============================================================================
-
-test("extractFileReferencesFromText — <file name> tags", () => {
+test("extractFileReferencesFromText: <file name> tags", () => {
   // Both FILE_TAG_REGEX and PATH_REGEX fire on the path inside the tag;
   // deduplication happens later in collectRecentFileReferences via a Set.
   const refs = extractFileReferencesFromText(
@@ -57,21 +53,21 @@ test("extractFileReferencesFromText — <file name> tags", () => {
   assert.ok(refs.includes("/etc/hosts"));
 });
 
-test("extractFileReferencesFromText — file:// URIs", () => {
+test("extractFileReferencesFromText: file:// URIs", () => {
   const refs = extractFileReferencesFromText(
     "open file:///home/user/readme.md for details",
   );
   assert.deepEqual(refs, ["file:///home/user/readme.md"]);
 });
 
-test("extractFileReferencesFromText — absolute paths in prose", () => {
+test("extractFileReferencesFromText: absolute paths in prose", () => {
   const refs = extractFileReferencesFromText(
     "we should update /src/utils/helpers.ts and also look at ~/.config/pi.json",
   );
   assert.deepEqual(refs, ["/src/utils/helpers.ts", "~/.config/pi.json"]);
 });
 
-test("extractFileReferencesFromText — mixed formats", () => {
+test("extractFileReferencesFromText: mixed formats", () => {
   // The <file name> tag path also matches PATH_REGEX, producing duplicates.
   const refs = extractFileReferencesFromText(
     '<file name="/a/b.ts"> and file:///c/d.txt and /e/f.ts',
@@ -81,16 +77,12 @@ test("extractFileReferencesFromText — mixed formats", () => {
   assert.ok(refs.includes("/e/f.ts"));
 });
 
-test("extractFileReferencesFromText — no matches", () => {
+test("extractFileReferencesFromText: no matches", () => {
   assert.deepEqual(extractFileReferencesFromText("nothing here"), []);
   assert.deepEqual(extractFileReferencesFromText(""), []);
 });
 
-// =============================================================================
-// extractPathsFromToolArgs
-// =============================================================================
-
-test("extractPathsFromToolArgs — direct single-path keys", () => {
+test("extractPathsFromToolArgs: direct single-path keys", () => {
   for (const key of [
     "path",
     "file",
@@ -105,7 +97,7 @@ test("extractPathsFromToolArgs — direct single-path keys", () => {
   }
 });
 
-test("extractPathsFromToolArgs — array keys", () => {
+test("extractPathsFromToolArgs: array keys", () => {
   for (const key of ["paths", "files", "filePaths"]) {
     assert.deepEqual(extractPathsFromToolArgs({ [key]: ["/a.ts", "/b.ts"] }), [
       "/a.ts",
@@ -114,35 +106,31 @@ test("extractPathsFromToolArgs — array keys", () => {
   }
 });
 
-test("extractPathsFromToolArgs — non-object / null / undefined", () => {
+test("extractPathsFromToolArgs: non-object / null / undefined", () => {
   assert.deepEqual(extractPathsFromToolArgs(null), []);
   assert.deepEqual(extractPathsFromToolArgs(undefined), []);
   assert.deepEqual(extractPathsFromToolArgs("just a string"), []);
   assert.deepEqual(extractPathsFromToolArgs(42), []);
 });
 
-test("extractPathsFromToolArgs — ignores non-string array items", () => {
+test("extractPathsFromToolArgs: ignores non-string array items", () => {
   assert.deepEqual(
     extractPathsFromToolArgs({ paths: ["/a.ts", 42, null, "/b.ts"] }),
     ["/a.ts", "/b.ts"],
   );
 });
 
-test("extractPathsFromToolArgs — empty object", () => {
+test("extractPathsFromToolArgs: empty object", () => {
   assert.deepEqual(extractPathsFromToolArgs({}), []);
 });
 
-// =============================================================================
-// extractFileReferencesFromContent
-// =============================================================================
-
-test("extractFileReferencesFromContent — plain string", () => {
+test("extractFileReferencesFromContent: plain string", () => {
   assert.deepEqual(extractFileReferencesFromContent("check /foo/bar.ts"), [
     "/foo/bar.ts",
   ]);
 });
 
-test("extractFileReferencesFromContent — array of text blocks", () => {
+test("extractFileReferencesFromContent: array of text blocks", () => {
   const refs = extractFileReferencesFromContent([
     { type: "text", text: "see /a.ts" },
     { type: "text", text: "and /b.ts" },
@@ -150,7 +138,7 @@ test("extractFileReferencesFromContent — array of text blocks", () => {
   assert.deepEqual(refs, ["/a.ts", "/b.ts"]);
 });
 
-test("extractFileReferencesFromContent — toolCall blocks", () => {
+test("extractFileReferencesFromContent: toolCall blocks", () => {
   const refs = extractFileReferencesFromContent([
     { type: "toolCall", name: "read", arguments: { path: "/tmp/read.ts" } },
     { type: "toolCall", name: "edit", arguments: { filePath: "/tmp/edit.ts" } },
@@ -158,7 +146,7 @@ test("extractFileReferencesFromContent — toolCall blocks", () => {
   assert.deepEqual(refs, ["/tmp/read.ts", "/tmp/edit.ts"]);
 });
 
-test("extractFileReferencesFromContent — mixed blocks", () => {
+test("extractFileReferencesFromContent: mixed blocks", () => {
   const refs = extractFileReferencesFromContent([
     { type: "text", text: "start with /a.ts" },
     { type: "toolCall", name: "write", arguments: { path: "/b.ts" } },
@@ -167,24 +155,20 @@ test("extractFileReferencesFromContent — mixed blocks", () => {
   assert.deepEqual(refs, ["/a.ts", "/b.ts"]);
 });
 
-test("extractFileReferencesFromContent — non-array, non-string", () => {
+test("extractFileReferencesFromContent: non-array, non-string", () => {
   assert.deepEqual(extractFileReferencesFromContent(42), []);
   assert.deepEqual(extractFileReferencesFromContent(null), []);
   assert.deepEqual(extractFileReferencesFromContent(true), []);
 });
 
-test("extractFileReferencesFromContent — skips non-object parts", () => {
+test("extractFileReferencesFromContent: skips non-object parts", () => {
   assert.deepEqual(
     extractFileReferencesFromContent(["plain string", 42, null]),
     [],
   );
 });
 
-// =============================================================================
-// extractFileReferencesFromEntry
-// =============================================================================
-
-test("extractFileReferencesFromEntry — message entry", () => {
+test("extractFileReferencesFromEntry: message entry", () => {
   const refs = extractFileReferencesFromEntry({
     type: "message",
     message: { role: "user", content: "look at /a/b.ts" },
@@ -192,7 +176,7 @@ test("extractFileReferencesFromEntry — message entry", () => {
   assert.deepEqual(refs, ["/a/b.ts"]);
 });
 
-test("extractFileReferencesFromEntry — message with array content", () => {
+test("extractFileReferencesFromEntry: message with array content", () => {
   const refs = extractFileReferencesFromEntry({
     type: "message",
     message: {
@@ -203,7 +187,7 @@ test("extractFileReferencesFromEntry — message with array content", () => {
   assert.deepEqual(refs, ["/x.ts"]);
 });
 
-test("extractFileReferencesFromEntry — custom_message entry", () => {
+test("extractFileReferencesFromEntry: custom_message entry", () => {
   const refs = extractFileReferencesFromEntry({
     type: "custom_message",
     content: "check /custom.ts",
@@ -211,23 +195,19 @@ test("extractFileReferencesFromEntry — custom_message entry", () => {
   assert.deepEqual(refs, ["/custom.ts"]);
 });
 
-test("extractFileReferencesFromEntry — unknown type", () => {
+test("extractFileReferencesFromEntry: unknown type", () => {
   assert.deepEqual(extractFileReferencesFromEntry({ type: "other" }), []);
   assert.deepEqual(extractFileReferencesFromEntry({}), []);
 });
 
-test("extractFileReferencesFromEntry — message without content", () => {
+test("extractFileReferencesFromEntry: message without content", () => {
   assert.deepEqual(
     extractFileReferencesFromEntry({ type: "message", message: {} }),
     [],
   );
 });
 
-// =============================================================================
-// sanitizeReference
-// =============================================================================
-
-test("sanitizeReference — strips quotes and brackets", () => {
+test("sanitizeReference: strips quotes and brackets", () => {
   assert.equal(sanitizeReference('"/path/to/file.ts"'), "/path/to/file.ts");
   assert.equal(sanitizeReference("'/path/to/file.ts'"), "/path/to/file.ts");
   assert.equal(sanitizeReference("`/path/to/file.ts`"), "/path/to/file.ts");
@@ -235,14 +215,14 @@ test("sanitizeReference — strips quotes and brackets", () => {
   assert.equal(sanitizeReference("[/path/to/file.ts]"), "/path/to/file.ts");
 });
 
-test("sanitizeReference — strips trailing punctuation", () => {
+test("sanitizeReference: strips trailing punctuation", () => {
   assert.equal(sanitizeReference("/path/to/file.ts,"), "/path/to/file.ts");
   assert.equal(sanitizeReference("/path/to/file.ts."), "/path/to/file.ts");
   assert.equal(sanitizeReference("/path/to/file.ts;"), "/path/to/file.ts");
   assert.equal(sanitizeReference("/path/to/file.ts:"), "/path/to/file.ts");
 });
 
-test("sanitizeReference — preserves inner special chars", () => {
+test("sanitizeReference: preserves inner special chars", () => {
   assert.equal(sanitizeReference("/path/to/file-v2.ts"), "/path/to/file-v2.ts");
   assert.equal(
     sanitizeReference("/path with spaces/file.ts"),
@@ -250,51 +230,43 @@ test("sanitizeReference — preserves inner special chars", () => {
   );
 });
 
-test("sanitizeReference — empty / whitespace-only", () => {
+test("sanitizeReference: empty / whitespace-only", () => {
   assert.equal(sanitizeReference(""), "");
   assert.equal(sanitizeReference("   "), "");
 });
 
-// =============================================================================
-// stripLineSuffix
-// =============================================================================
-
-test("stripLineSuffix — GitHub line suffix", () => {
+test("stripLineSuffix: GitHub line suffix", () => {
   assert.equal(stripLineSuffix("/a/b.ts#L42"), "/a/b.ts");
   assert.equal(stripLineSuffix("/a/b.ts#L10C5"), "/a/b.ts");
 });
 
-test("stripLineSuffix — vim-style colon suffix", () => {
+test("stripLineSuffix: vim-style colon suffix", () => {
   assert.equal(stripLineSuffix("/a/b.ts:42"), "/a/b.ts");
   assert.equal(stripLineSuffix("/a/b.ts:10:5"), "/a/b.ts");
 });
 
-test("stripLineSuffix — colon after last separator", () => {
+test("stripLineSuffix: colon after last separator", () => {
   // Only strips if colon appears in the filename segment (after last /)
   assert.equal(stripLineSuffix("src/main.ts:42"), "src/main.ts");
 });
 
-test("stripLineSuffix — no suffix", () => {
+test("stripLineSuffix: no suffix", () => {
   assert.equal(stripLineSuffix("/a/b.ts"), "/a/b.ts");
   assert.equal(stripLineSuffix("/a/b/c"), "/a/b/c");
 });
 
-test("stripLineSuffix — colons in path (not line numbers)", () => {
-  // Windows-style path — colon in segment before last separator, not a line number
+test("stripLineSuffix: colons in path (not line numbers)", () => {
+  // Windows-style path: colon in segment before last separator, not a line number
   const result = stripLineSuffix("C:\\foo\\bar.ts");
   assert.equal(result.includes("bar.ts"), true);
 });
 
-// =============================================================================
-// normalizeReferencePath
-// =============================================================================
-
-test("normalizeReferencePath — absolute path passes through", () => {
+test("normalizeReferencePath: absolute path passes through", () => {
   const cwd = "/home/user/project";
   assert.equal(normalizeReferencePath("/etc/hosts", cwd), "/etc/hosts");
 });
 
-test("normalizeReferencePath — relative path resolved against cwd", () => {
+test("normalizeReferencePath: relative path resolved against cwd", () => {
   const cwd = "/home/user/project";
   assert.equal(
     normalizeReferencePath("src/main.ts", cwd),
@@ -302,7 +274,7 @@ test("normalizeReferencePath — relative path resolved against cwd", () => {
   );
 });
 
-test("normalizeReferencePath — tilde expansion", () => {
+test("normalizeReferencePath: tilde expansion", () => {
   const cwd = "/tmp";
   const result = normalizeReferencePath("~/documents/readme.md", cwd);
   assert.ok(result?.startsWith("/"));
@@ -310,36 +282,36 @@ test("normalizeReferencePath — tilde expansion", () => {
   assert.ok(!result?.includes("~"));
 });
 
-test("normalizeReferencePath — file:// URI", () => {
+test("normalizeReferencePath: file:// URI", () => {
   assert.equal(
     normalizeReferencePath("file:///home/user/file.txt", "/tmp"),
     "/home/user/file.txt",
   );
 });
 
-test("normalizeReferencePath — strips line suffixes inline", () => {
+test("normalizeReferencePath: strips line suffixes inline", () => {
   assert.equal(normalizeReferencePath("/a/b.ts#L42", "/tmp"), "/a/b.ts");
 });
 
-test("normalizeReferencePath — comment-like returns null", () => {
+test("normalizeReferencePath: comment-like returns null", () => {
   assert.equal(normalizeReferencePath("// not a path", "/tmp"), null);
 });
 
-test("normalizeReferencePath — empty / whitespace-only returns null", () => {
+test("normalizeReferencePath: empty / whitespace-only returns null", () => {
   assert.equal(normalizeReferencePath("", "/tmp"), null);
   assert.equal(normalizeReferencePath("   ", "/tmp"), null);
 });
 
-test("normalizeReferencePath — trailing slashes stripped", () => {
+test("normalizeReferencePath: trailing slashes stripped", () => {
   assert.equal(normalizeReferencePath("/a/b/c/", "/tmp"), "/a/b/c");
 });
 
-test("normalizeReferencePath — bare file:// resolves to root", () => {
+test("normalizeReferencePath: bare file:// resolves to root", () => {
   // file:// with no authority or path is a valid file URL pointing at /
   assert.equal(normalizeReferencePath("file://", "/tmp"), "/");
 });
 
-test("normalizeReferencePath — trailing quotes stripped then resolved", () => {
+test("normalizeReferencePath: trailing quotes stripped then resolved", () => {
   // sanitizeReference strips the quotes, then it resolves as a normal path
   assert.equal(
     normalizeReferencePath('"/home/user/file.ts"', "/tmp"),
@@ -347,36 +319,28 @@ test("normalizeReferencePath — trailing quotes stripped then resolved", () => 
   );
 });
 
-// =============================================================================
-// formatDisplayPath
-// =============================================================================
-
-test("formatDisplayPath — path under cwd becomes relative", () => {
+test("formatDisplayPath: path under cwd becomes relative", () => {
   assert.equal(
     formatDisplayPath("/home/user/project/src/main.ts", "/home/user/project"),
     "src/main.ts",
   );
 });
 
-test("formatDisplayPath — path outside cwd stays absolute", () => {
+test("formatDisplayPath: path outside cwd stays absolute", () => {
   assert.equal(
     formatDisplayPath("/etc/hosts", "/home/user/project"),
     "/etc/hosts",
   );
 });
 
-test("formatDisplayPath — cwd trailing slash handled", () => {
+test("formatDisplayPath: cwd trailing slash handled", () => {
   assert.equal(
     formatDisplayPath("/home/user/project/src/main.ts", "/home/user/project/"),
     "src/main.ts",
   );
 });
 
-// =============================================================================
-// parseGitStatusOutput
-// =============================================================================
-
-test("parseGitStatusOutput — modified and untracked entries", () => {
+test("parseGitStatusOutput: modified and untracked entries", () => {
   const records = parseGitStatusOutput(" M src/a.ts\0?? new.txt\0");
   assert.deepEqual(records, [
     { status: " M", path: "src/a.ts" },
@@ -384,8 +348,8 @@ test("parseGitStatusOutput — modified and untracked entries", () => {
   ]);
 });
 
-test("parseGitStatusOutput — rename keeps the destination path", () => {
-  // -z format: `R  <new>\0<old>\0` — destination first, then original path
+test("parseGitStatusOutput: rename keeps the destination path", () => {
+  // -z format: `R  <new>\0<old>\0`: destination first, then original path
   const records = parseGitStatusOutput("R  new.txt\0old.txt\0?? other.txt\0");
   assert.deepEqual(records, [
     { status: "R ", path: "new.txt", origPath: "old.txt" },
@@ -393,18 +357,18 @@ test("parseGitStatusOutput — rename keeps the destination path", () => {
   ]);
 });
 
-test("parseGitStatusOutput — copy keeps the destination path", () => {
+test("parseGitStatusOutput: copy keeps the destination path", () => {
   const records = parseGitStatusOutput("C  copy.txt\0source.txt\0");
   assert.deepEqual(records, [
     { status: "C ", path: "copy.txt", origPath: "source.txt" },
   ]);
 });
 
-test("parseGitStatusOutput — empty output", () => {
+test("parseGitStatusOutput: empty output", () => {
   assert.deepEqual(parseGitStatusOutput(""), []);
 });
 
-test("parseGitStatusOutput — real git repo with staged rename", () => {
+test("parseGitStatusOutput: real git repo with staged rename", () => {
   withTempDir((dir) => {
     const git = initGitRepo(dir);
     writeFileSync(path.join(dir, "old.txt"), "hello\n");
@@ -418,11 +382,7 @@ test("parseGitStatusOutput — real git repo with staged rename", () => {
   });
 });
 
-// =============================================================================
-// toCanonicalPath
-// =============================================================================
-
-test("toCanonicalPath — preserves symlink path identity", () => {
+test("toCanonicalPath: preserves symlink path identity", () => {
   withTempDir((dir) => {
     mkdirSync(path.join(dir, "target"));
     writeFileSync(path.join(dir, "target", "a"), "content\n");
@@ -433,7 +393,7 @@ test("toCanonicalPath — preserves symlink path identity", () => {
   });
 });
 
-test("toCanonicalPath — distinct symlinks to one target stay distinct", () => {
+test("toCanonicalPath: distinct symlinks to one target stay distinct", () => {
   withTempDir((dir) => {
     writeFileSync(path.join(dir, "a"), "content\n");
     symlinkSync("a", path.join(dir, "link-1"));
@@ -444,7 +404,7 @@ test("toCanonicalPath — distinct symlinks to one target stay distinct", () => 
   });
 });
 
-test("toCanonicalPath — tracked symlink in a real git repo", () => {
+test("toCanonicalPath: tracked symlink in a real git repo", () => {
   withTempDir((dir) => {
     const git = initGitRepo(dir);
     mkdirSync(path.join(dir, "target"));
@@ -463,7 +423,7 @@ test("toCanonicalPath — tracked symlink in a real git repo", () => {
   });
 });
 
-test("toCanonicalPath — missing path is kept with exists=false", () => {
+test("toCanonicalPath: missing path is kept with exists=false", () => {
   withTempDir((dir) => {
     const missing = path.join(dir, "deleted.txt");
     assert.deepEqual(toCanonicalPath(missing), {
@@ -473,10 +433,6 @@ test("toCanonicalPath — missing path is kept with exists=false", () => {
     });
   });
 });
-
-// =============================================================================
-// collectSessionFileChanges
-// =============================================================================
 
 function makeToolCallEntries(
   filePath: string,
@@ -517,7 +473,7 @@ function makeToolCallEntries(
   ] as unknown as SessionEntry[];
 }
 
-test("collectSessionFileChanges — successful edit is recorded", () => {
+test("collectSessionFileChanges: successful edit is recorded", () => {
   withTempDir((dir) => {
     const filePath = path.join(dir, "a.ts");
     writeFileSync(filePath, "content\n");
@@ -530,7 +486,7 @@ test("collectSessionFileChanges — successful edit is recorded", () => {
   });
 });
 
-test("collectSessionFileChanges — failed edit is ignored", () => {
+test("collectSessionFileChanges: failed edit is ignored", () => {
   withTempDir((dir) => {
     const filePath = path.join(dir, "a.ts");
     writeFileSync(filePath, "content\n");

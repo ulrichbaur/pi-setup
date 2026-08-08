@@ -3,7 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import type { Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const directory = await mkdtemp(join(tmpdir(), "model-effort-test-"));
 const preferencesFile = join(directory, "model-effort.json");
@@ -23,7 +24,7 @@ function model(
   provider: string,
   id: string,
   supported: ThinkingLevel[] = ["minimal", "low", "medium", "high"],
-): Model<any> {
+): Model<Api> {
   const all = [
     "off",
     "minimal",
@@ -45,17 +46,17 @@ function model(
           : null,
       ]),
     ),
-  } as Model<any>;
+  } as Model<Api>;
 }
 
 function fakePi(initialLevel: ThinkingLevel = "medium") {
-  const handlers = new Map<string, (...args: any[]) => void>();
+  const handlers = new Map<string, (...args: unknown[]) => void>();
   let level = initialLevel;
   const selected: ThinkingLevel[] = [];
 
   return {
     pi: {
-      on(name: string, handler: (...args: any[]) => void) {
+      on(name: string, handler: (...args: unknown[]) => void) {
         handlers.set(name, handler);
       },
       getThinkingLevel() {
@@ -65,23 +66,37 @@ function fakePi(initialLevel: ThinkingLevel = "medium") {
         level = next;
         selected.push(next);
       },
-    } as any,
+    } as unknown as ExtensionAPI,
     handlers,
     selected,
     level: () => level,
   };
 }
 
-async function waitForWrites(): Promise<void> {
+async function waitForPreference(
+  key: string,
+  expected: ThinkingLevel,
+): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
-      await readFile(preferencesFile, "utf8");
-      return;
+      const preferences = JSON.parse(await readFile(preferencesFile, "utf8"));
+      if (preferences[key] === expected) return;
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      // The preference file may not exist while the first write is queued.
     }
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  throw new Error("preference file was not written");
+  throw new Error(`preference ${key} was not saved as ${expected}`);
+}
+
+function emit(
+  fake: ReturnType<typeof fakePi>,
+  name: string,
+  ...args: unknown[]
+): void {
+  const handler = fake.handlers.get(name);
+  assert.ok(handler, `missing ${name} handler`);
+  handler(...args);
 }
 
 test("saves and applies the first supported level for a new model", async () => {
@@ -90,8 +105,8 @@ test("saves and applies the first supported level for a new model", async () => 
   await modelEffort(fake.pi);
   const current = model("provider-a", "model-a", ["low", "high"]);
 
-  fake.handlers.get("session_start")?.({}, { model: current });
-  await waitForWrites();
+  emit(fake, "session_start", {}, { model: current });
+  await waitForPreference("provider-a/model-a", "low");
 
   assert.equal(fake.level(), "low");
   assert.deepEqual(fake.selected, ["low"]);
@@ -109,7 +124,7 @@ test("restores the closest supported level below a saved level", async () => {
   await modelEffort(fake.pi);
   const current = model("provider-a", "model-a", ["minimal", "low"]);
 
-  fake.handlers.get("model_select")?.({ model: current });
+  emit(fake, "model_select", { model: current });
 
   assert.equal(fake.level(), "low");
 });
@@ -121,26 +136,12 @@ test("records user changes only for the active model", async () => {
   const active = model("provider-a", "model-a");
   const other = model("provider-a", "model-b");
 
-  fake.handlers.get("model_select")?.({ model: active });
-  await waitForWrites();
-  fake.handlers.get("thinking_level_select")?.(
-    { level: "high" },
-    { model: other },
-  );
-  fake.handlers.get("thinking_level_select")?.(
-    { level: "off" },
-    { model: active },
-  );
-  fake.handlers.get("thinking_level_select")?.(
-    { level: "high" },
-    { model: active },
-  );
-
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const saved = JSON.parse(await readFile(preferencesFile, "utf8"));
-    if (saved["provider-a/model-a"] === "high") break;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  emit(fake, "model_select", { model: active });
+  await waitForPreference("provider-a/model-a", "minimal");
+  emit(fake, "thinking_level_select", { level: "high" }, { model: other });
+  emit(fake, "thinking_level_select", { level: "off" }, { model: active });
+  emit(fake, "thinking_level_select", { level: "high" }, { model: active });
+  await waitForPreference("provider-a/model-a", "high");
 
   assert.deepEqual(JSON.parse(await readFile(preferencesFile, "utf8")), {
     "provider-a/model-a": "high",
@@ -152,10 +153,15 @@ test("ignores malformed preference files", async () => {
   const fake = fakePi("high");
 
   await modelEffort(fake.pi);
-  fake.handlers.get("session_start")?.(
+  emit(
+    fake,
+    "session_start",
     {},
-    { model: model("provider-b", "model-b") },
+    {
+      model: model("provider-b", "model-b"),
+    },
   );
 
   assert.equal(fake.level(), "minimal");
+  await waitForPreference("provider-b/model-b", "minimal");
 });
