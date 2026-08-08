@@ -103,6 +103,12 @@ clipboard. Renames keep their destination path, tracked symlinks keep their
 own path identity, and failed edit/write tool calls do not count as session
 changes. The browser requires TUI mode.
 
+### Save Markdown
+
+`extensions/save-md.ts` adds `/save-md name`, which writes the latest assistant
+response to `name.md`. Relative paths use the current directory, subdirectories
+and absolute paths are supported, and existing files are never overwritten.
+
 ## Develop locally
 
 Install this checkout as a local Pi package:
