@@ -119,6 +119,18 @@ The tool supports exact phrases, exclusions, site restrictions, and up to ten re
 It uses Readability for HTML and falls back to Jina Reader for dynamic pages.
 Responses and model-visible output have explicit size limits.
 
+### Subagents
+
+`extensions/subagents/` adds the `subagent` tool with single and parallel modes.
+It provides scout, researcher, and worker agents in isolated Pi processes.
+The researcher receives only the web tools.
+The worker receives file tools and `safe_bash`, which blocks common destructive system commands.
+
+`extensions/subagents/config.json` is required.
+Each agent may set a `provider/model` value there.
+An agent without a configured model inherits the parent model and thinking level.
+The same file controls concurrency and the maximum parallel task count.
+
 ## Develop locally
 
 Install this checkout as a local Pi package:
