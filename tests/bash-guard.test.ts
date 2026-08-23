@@ -50,6 +50,11 @@ test("bash review keeps actions visible while a long command scrolls", () => {
   const firstPage = component.render(60);
   assert.equal(firstPage.length, 20);
   assert.ok(firstPage.some((line) => line.includes("line-0")));
+  const commandHeaderIndex = firstPage.findIndex((line) =>
+    line.includes("Command (lines 1-"),
+  );
+  assert.ok(commandHeaderIndex > 0);
+  assert.equal(firstPage[commandHeaderIndex - 1], "─".repeat(60));
   const abortIndex = firstPage.findIndex((line) => line.includes("Abort"));
   assert.ok(abortIndex > 0);
   assert.equal(firstPage[abortIndex - 1], "─".repeat(60));
@@ -58,7 +63,7 @@ test("bash review keeps actions visible while a long command scrolls", () => {
 
   component.handleInput("\x1b[6~");
   const secondPage = component.render(60);
-  assert.ok(secondPage.some((line) => line.includes("line-12")));
+  assert.ok(secondPage.some((line) => line.includes("line-11")));
   assert.ok(!secondPage.some((line) => line.includes("line-0")));
   assert.ok(secondPage.some((line) => line.includes("Abort")));
   assert.ok(secondPage.some((line) => line.includes("Run")));

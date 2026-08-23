@@ -99,6 +99,7 @@ export class BashReviewComponent implements Component {
       ...topBorder,
       ...titleLines,
       ...reasonLines,
+      ...this.separator.render(width),
       ...placeholderHeader,
     ];
 
