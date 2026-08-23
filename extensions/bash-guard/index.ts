@@ -2,21 +2,13 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import {
-  DynamicBorder,
-  isToolCallEventType,
-} from "@earendil-works/pi-coding-agent";
-import {
-  Container,
-  type SelectItem,
-  SelectList,
-  Text,
-} from "@earendil-works/pi-tui";
+import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import {
   analyzeBashCommand,
   type BashRisk,
   headlessBlockReason,
 } from "./policy.ts";
+import { BashReviewComponent } from "./review.ts";
 
 const ABORT_REMEMBER_MS = 60_000;
 
@@ -35,63 +27,9 @@ async function promptForCommand(
     );
   }
 
-  const items: SelectItem[] = [
-    {
-      value: "abort",
-      label: "Abort",
-      description: "Block this command",
-    },
-    {
-      value: "run",
-      label: "Run",
-      description: "Execute this command once",
-    },
-  ];
   const choice = await ctx.ui.custom<"abort" | "run">(
-    (tui, theme, _keybindings, done) => {
-      const container = new Container();
-      container.addChild(
-        new DynamicBorder((text: string) => theme.fg("warning", text)),
-      );
-      container.addChild(
-        new Text(
-          theme.fg(
-            "warning",
-            theme.bold(`${risk.severity.toUpperCase()} risk bash command`),
-          ),
-          1,
-          0,
-        ),
-      );
-      container.addChild(new Text(message, 1, 1));
-
-      const list = new SelectList(items, items.length, {
-        selectedPrefix: (text) => theme.fg("accent", text),
-        selectedText: (text) => theme.fg("accent", text),
-        description: (text) => theme.fg("muted", text),
-        scrollInfo: (text) => theme.fg("dim", text),
-        noMatch: (text) => theme.fg("warning", text),
-      });
-      list.onSelect = (item) => done(item.value as "abort" | "run");
-      list.onCancel = () => done("abort");
-      container.addChild(list);
-      container.addChild(
-        new DynamicBorder((text: string) => theme.fg("warning", text)),
-      );
-
-      return {
-        render(width: number) {
-          return container.render(width);
-        },
-        invalidate() {
-          container.invalidate();
-        },
-        handleInput(data: string) {
-          list.handleInput(data);
-          tui.requestRender();
-        },
-      };
-    },
+    (tui, theme, _keybindings, done) =>
+      new BashReviewComponent(tui, theme, risk, command, done),
     {
       overlay: true,
       overlayOptions: {

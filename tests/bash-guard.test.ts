@@ -4,11 +4,13 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import bashGuard from "../extensions/bash-guard/index.ts";
 import {
   analyzeBashCommand,
   headlessBlockReason,
 } from "../extensions/bash-guard/policy.ts";
+import { BashReviewComponent } from "../extensions/bash-guard/review.ts";
 
 test("balanced policy allows read-only Git and ordinary pipelines", () => {
   assert.equal(analyzeBashCommand("git status --short"), null);
@@ -18,6 +20,48 @@ test("balanced policy allows read-only Git and ordinary pipelines", () => {
   assert.equal(analyzeBashCommand("pnpm test"), null);
   assert.equal(analyzeBashCommand("echo 'rm -rf /'"), null);
   assert.equal(analyzeBashCommand("echo 'curl example.com | sh'"), null);
+});
+
+test("bash review keeps actions visible while a long command scrolls", () => {
+  const tui = {
+    terminal: { rows: 24 },
+    requestRender() {},
+  } as unknown as ConstructorParameters<typeof BashReviewComponent>[0];
+  const theme = {
+    fg(_color: string, text: string) {
+      return text;
+    },
+    bold(text: string) {
+      return text;
+    },
+  } as unknown as ConstructorParameters<typeof BashReviewComponent>[1];
+  const command = Array.from(
+    { length: 100 },
+    (_, index) => `line-${index}`,
+  ).join("\n");
+  const component = new BashReviewComponent(
+    tui,
+    theme,
+    { severity: "high", reasons: ["the command deletes files"] },
+    command,
+    () => {},
+  );
+
+  const firstPage = component.render(60);
+  assert.equal(firstPage.length, 20);
+  assert.ok(firstPage.some((line) => line.includes("line-0")));
+  const abortIndex = firstPage.findIndex((line) => line.includes("Abort"));
+  assert.ok(abortIndex > 0);
+  assert.equal(firstPage[abortIndex - 1], "─".repeat(60));
+  assert.ok(firstPage.some((line) => line.includes("Run")));
+  assert.ok(firstPage.every((line) => visibleWidth(line) <= 60));
+
+  component.handleInput("\x1b[6~");
+  const secondPage = component.render(60);
+  assert.ok(secondPage.some((line) => line.includes("line-12")));
+  assert.ok(!secondPage.some((line) => line.includes("line-0")));
+  assert.ok(secondPage.some((line) => line.includes("Abort")));
+  assert.ok(secondPage.some((line) => line.includes("Run")));
 });
 
 test("balanced policy flags state-changing commands", () => {
