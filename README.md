@@ -111,6 +111,10 @@ and absolute paths are supported, and existing files are never overwritten.
 
 ### Web tools
 
+`extensions/web-search/` adds `web_search` through Google Custom Search.
+Set `GOOGLE_SEARCH_API_KEY` and `GOOGLE_CSE_ID` in the environment.
+The tool supports exact phrases, exclusions, site restrictions, and up to ten results.
+
 `extensions/web-fetch/` adds `web_fetch` for HTML, text, and PDF content.
 It uses Readability for HTML and falls back to Jina Reader for dynamic pages.
 Responses and model-visible output have explicit size limits.
