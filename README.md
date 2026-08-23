@@ -98,10 +98,32 @@ manually changing either file.
 browser over the current Git tree — tracked and untracked files with their Git
 status — plus files referenced or edited in the session. Dirty files sort
 first, then files changed this session, newest first. Selecting a file offers
-two actions: add an `@path` mention to the prompt, or copy the path to the
-clipboard. Renames keep their destination path, tracked symlinks keep their
-own path identity, and failed edit/write tool calls do not count as session
-changes. The browser requires TUI mode.
+actions to add an `@path` mention to the prompt or copy the path to the
+clipboard. Pi changes also support viewing a diff, accepting changes, and
+reverting changes when no external conflict exists. Renames keep their
+destination path, tracked symlinks keep their own path identity, and failed
+edit/write tool calls do not count as session changes. The browser requires TUI
+mode.
+
+### Context
+
+`extensions/context.ts` adds `/context`, a TUI overlay with estimated context
+categories, usage, cache and cost statistics, and compaction suggestions. It
+requires TUI mode.
+
+### Linked Markdown
+
+`extensions/md-link.ts` adds a collaborative Markdown workflow. `/link-md path`
+links a file and creates it when needed. `/unlink-md` removes the link.
+`/send-diff` and `/sd` send external file changes as a user message. Final
+assistant replies append to the linked file.
+
+### Bash guard
+
+`extensions/bash-guard/` reviews flagged Bash commands before execution.
+Interactive sessions can approve or block commands. Non-interactive sessions
+fail closed unless `bash-guard-auto-allow` is enabled. The shared policy also
+blocks catastrophic and parent-session Git operations in subagents.
 
 ### Save Markdown
 
@@ -127,8 +149,9 @@ The researcher receives only the web tools.
 The worker receives file tools and `safe_bash`, which blocks common destructive system commands.
 
 `extensions/subagents/config.json` is required.
-Each agent may set a `provider/model` value there.
-An agent without a configured model inherits the parent model and thinking level.
+Each agent may set a `models` array of `provider/model` IDs there.
+The first available preferred model is selected. An agent without an available
+preferred model inherits the parent model and thinking level.
 The same file controls concurrency and the maximum parallel task count.
 
 ## Develop locally
