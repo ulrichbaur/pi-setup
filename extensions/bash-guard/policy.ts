@@ -16,7 +16,14 @@ type ShellToken = string | OperatorToken;
 
 const SHELL_COMMANDS = new Set(["sh", "bash", "zsh", "fish", "dash"]);
 const CONTROL_OPERATORS = new Set(["&&", "||", ";", "&", "|"]);
-const OUTPUT_OPERATORS = new Set([">", ">>"]);
+const OUTPUT_OPERATORS = new Set([">", ">>", ">&"]);
+const SAFE_REDIRECT_TARGETS = new Set([
+  "/dev/null",
+  "/dev/stdout",
+  "/dev/stderr",
+  "/dev/fd/1",
+  "/dev/fd/2",
+]);
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const FORK_BOMB_PATTERN = /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/;
 
@@ -339,6 +346,23 @@ function analyzeCommand(
   }
 }
 
+function hasUnsafeOutputRedirection(tokens: ShellToken[]): boolean {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!isOperator(token) || !OUTPUT_OPERATORS.has(token.op)) continue;
+
+    const target = tokenText(tokens[index + 1]);
+    if (
+      (token.op === ">&" && (target === "1" || target === "2")) ||
+      (target !== null && SAFE_REDIRECT_TARGETS.has(target))
+    ) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 function downloadsArePipedToShell(tokens: ShellToken[]): boolean {
   let current: ShellToken[] = [];
   let downloaderInPipeline = false;
@@ -403,9 +427,7 @@ export function analyzeBashCommand(
   }
 
   const risks: BashRisk[] = [];
-  if (
-    parsed.some((token) => isOperator(token) && OUTPUT_OPERATORS.has(token.op))
-  ) {
+  if (hasUnsafeOutputRedirection(parsed)) {
     addRisk(risks, "medium", "shell output redirection can overwrite files");
   }
 

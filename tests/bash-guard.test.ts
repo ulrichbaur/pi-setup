@@ -16,7 +16,16 @@ test("balanced policy allows read-only Git and ordinary pipelines", () => {
   assert.equal(analyzeBashCommand("git status --short"), null);
   assert.equal(analyzeBashCommand("git diff --stat"), null);
   assert.equal(analyzeBashCommand("git -C ../project status --short"), null);
+  assert.equal(analyzeBashCommand("echo hi | head"), null);
+  assert.equal(analyzeBashCommand("printf hi | tail -1"), null);
   assert.equal(analyzeBashCommand("rg TODO src | head -20"), null);
+  assert.equal(
+    analyzeBashCommand('rg -n "bash-guard|guard" . 2>/dev/null | head -80'),
+    null,
+  );
+  assert.equal(analyzeBashCommand("printf hi > /dev/null"), null);
+  assert.equal(analyzeBashCommand("printf hi 2>/dev/null"), null);
+  assert.equal(analyzeBashCommand("printf hi >&1"), null);
   assert.equal(analyzeBashCommand("pnpm test"), null);
   assert.equal(analyzeBashCommand("echo 'rm -rf /'"), null);
   assert.equal(analyzeBashCommand("echo 'curl example.com | sh'"), null);
