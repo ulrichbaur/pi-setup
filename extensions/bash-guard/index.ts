@@ -12,19 +12,43 @@ import { BashReviewComponent } from "./review.ts";
 
 const ABORT_REMEMBER_MS = 60_000;
 
+type BashPromptResult = {
+  run: boolean;
+  rejectReason?: string;
+};
+
+type RecentAbort = {
+  at: number;
+  rejectReason?: string;
+};
+
+async function promptForRejectReason(
+  ctx: ExtensionContext,
+): Promise<string | undefined> {
+  const reason = await ctx.ui.input(
+    "Why abort this command? (optional)",
+    "Leave empty to continue without a reason",
+  );
+  const trimmed = reason?.trim();
+  return trimmed || undefined;
+}
+
 async function promptForCommand(
   ctx: ExtensionContext,
   command: string,
   risk: BashRisk,
-): Promise<boolean> {
+): Promise<BashPromptResult> {
   const reasons = risk.reasons.map((reason) => `• ${reason}`).join("\n");
   const message = `${reasons}\n\nCommand:\n${command}`;
 
   if (ctx.mode !== "tui") {
-    return ctx.ui.confirm(
+    const run = await ctx.ui.confirm(
       `${risk.severity.toUpperCase()} risk bash command`,
       message,
     );
+    return run
+      ? { run }
+      : { run, rejectReason: await promptForRejectReason(ctx) };
   }
 
   const choice = await ctx.ui.custom<"abort" | "run">(
@@ -40,7 +64,8 @@ async function promptForCommand(
       },
     },
   );
-  return choice === "run";
+  if (choice === "run") return { run: true };
+  return { run: false, rejectReason: await promptForRejectReason(ctx) };
 }
 
 function subagentDepth(): number {
@@ -69,7 +94,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
     default: false,
   });
 
-  const recentlyAborted = new Map<string, number>();
+  const recentlyAborted = new Map<string, RecentAbort>();
   pi.on("tool_call", async (event, ctx) => {
     if (!isToolCallEventType("bash", event)) return;
     const command = event.input.command;
@@ -79,12 +104,14 @@ export default function bashGuard(pi: ExtensionAPI): void {
     const previousAbort = recentlyAborted.get(command);
     if (
       previousAbort !== undefined &&
-      Date.now() - previousAbort < ABORT_REMEMBER_MS
+      Date.now() - previousAbort.at < ABORT_REMEMBER_MS
     ) {
+      const rejectReason = previousAbort.rejectReason
+        ? ` The user's rejection reason was: ${previousAbort.rejectReason}.`
+        : "";
       return {
         block: true,
-        reason:
-          "Blocked by bash-guard because the same command was aborted recently. Do not retry it unchanged.",
+        reason: `Blocked by bash-guard because the same command was aborted recently.${rejectReason} Do not retry it unchanged.`,
       };
     }
 
@@ -96,12 +123,18 @@ export default function bashGuard(pi: ExtensionAPI): void {
       };
     }
 
-    if (await promptForCommand(ctx, command, risk)) return;
-    recentlyAborted.set(command, Date.now());
+    const result = await promptForCommand(ctx, command, risk);
+    if (result.run) return;
+    recentlyAborted.set(command, {
+      at: Date.now(),
+      rejectReason: result.rejectReason,
+    });
+    const rejectReason = result.rejectReason
+      ? ` The user's rejection reason was: ${result.rejectReason}.`
+      : "";
     return {
       block: true,
-      reason:
-        "Blocked by the user through bash-guard. Propose a safer command or ask before trying a materially different operation.",
+      reason: `Blocked by the user through bash-guard.${rejectReason} Propose a safer command or ask before trying a materially different operation.`,
     };
   });
 }

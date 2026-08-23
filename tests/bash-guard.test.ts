@@ -191,6 +191,9 @@ test("bash-guard uses RPC confirmation and remembers an abort", async () => {
         confirmations += 1;
         return false;
       },
+      async input() {
+        return "  do not change the release commit  ";
+      },
     },
   } as unknown as ExtensionContext;
 
@@ -200,9 +203,33 @@ test("bash-guard uses RPC confirmation and remembers an abort", async () => {
   );
   assert.match(
     (await handler(bashCall("git commit -m test"), context))?.reason ?? "",
+    /do not change the release commit/,
+  );
+  assert.match(
+    (await handler(bashCall("git commit -m test"), context))?.reason ?? "",
     /aborted recently/,
   );
+  assert.match(
+    (await handler(bashCall("git commit -m test"), context))?.reason ?? "",
+    /do not change the release commit/,
+  );
   assert.equal(confirmations, 1);
+});
+
+test("bash-guard allows aborting without a reject reason", async () => {
+  const handler = createGuardHarness();
+  const context = {
+    hasUI: true,
+    mode: "rpc",
+    ui: {
+      confirm: async () => false,
+      input: async () => "   ",
+    },
+  } as unknown as ExtensionContext;
+
+  const result = await handler(bashCall("rm file.txt"), context);
+  assert.match(result?.reason ?? "", /Blocked by the user/);
+  assert.doesNotMatch(result?.reason ?? "", /rejection reason/);
 });
 
 test("bash-guard allows an interactively confirmed command", async () => {

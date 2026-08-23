@@ -121,8 +121,9 @@ assistant replies append to the linked file.
 ### Bash guard
 
 `extensions/bash-guard/` reviews flagged Bash commands before execution.
-Interactive sessions can approve or block commands. Non-interactive sessions
-fail closed unless `bash-guard-auto-allow` is enabled. The shared policy also
+Interactive sessions can approve or block commands and optionally provide a
+reason when they abort one. Non-interactive sessions fail closed unless
+`bash-guard-auto-allow` is enabled. The shared policy also
 blocks catastrophic and parent-session Git operations in subagents.
 
 ### Save Markdown

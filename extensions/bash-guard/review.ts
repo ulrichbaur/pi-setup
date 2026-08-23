@@ -50,7 +50,7 @@ export class BashReviewComponent implements Component {
       {
         value: "abort",
         label: "Abort",
-        description: "Block this command",
+        description: "Block this command and optionally give a reason",
       },
       {
         value: "run",
