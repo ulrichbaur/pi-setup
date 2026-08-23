@@ -109,6 +109,12 @@ changes. The browser requires TUI mode.
 response to `name.md`. Relative paths use the current directory, subdirectories
 and absolute paths are supported, and existing files are never overwritten.
 
+### Web tools
+
+`extensions/web-fetch/` adds `web_fetch` for HTML, text, and PDF content.
+It uses Readability for HTML and falls back to Jina Reader for dynamic pages.
+Responses and model-visible output have explicit size limits.
+
 ## Develop locally
 
 Install this checkout as a local Pi package:
