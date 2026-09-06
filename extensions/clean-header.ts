@@ -7,7 +7,8 @@ export function cleanHeaderText(theme: Theme): string {
   const hint = (key: string, label: string): string =>
     theme.fg("dim", key) + theme.fg("muted", ` ${label}`);
 
-  const logo = theme.bold(theme.fg("accent", "pi")) + theme.fg("dim", ` v${VERSION}`);
+  const logo =
+    theme.bold(theme.fg("accent", "pi")) + theme.fg("dim", ` v${VERSION}`);
   const shortcuts = [
     hint(keyText("app.interrupt"), "interrupt"),
     hint(`${keyText("app.clear")}/${keyText("app.exit")}`, "clear/exit"),

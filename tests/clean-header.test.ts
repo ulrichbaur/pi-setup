@@ -14,10 +14,13 @@ const theme = {
 } as unknown as Theme;
 
 test("cleanHeaderText keeps the compact startup header to two lines", () => {
-  const lines = cleanHeaderText(theme).split("\n");
+  const text = cleanHeaderText(theme);
+  assert.ok(text.startsWith("\n"), "header starts with a blank line");
 
+  const lines = text.slice(1).split("\n");
   assert.equal(lines.length, 2);
-  assert.equal(lines[0], `pi v${VERSION}`);
+  assert.equal(lines[0], ` pi v${VERSION}`);
+  assert.match(lines[1], /^ /);
   assert.match(lines[1], /interrupt/);
   assert.match(lines[1], /clear\/exit/);
   assert.match(lines[1], /commands/);
