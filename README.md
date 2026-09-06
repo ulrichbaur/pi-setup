@@ -166,6 +166,13 @@ pi install "$(pwd)"
 
 After editing resources, run `/reload` inside Pi.
 
+Enable the pre-commit hook once per checkout so `pnpm check` runs before
+every commit:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
 ## Install from Git
 
 Once the repository has a remote, install it with:
