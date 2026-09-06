@@ -67,20 +67,136 @@ function splitCommands(tokens: ShellToken[]): ShellToken[][] {
   return commands;
 }
 
-function commandWords(tokens: ShellToken[]): string[] {
-  const words = tokens
-    .map(tokenText)
-    .filter((token): token is string => token !== null);
-  while (words[0]?.match(ENV_ASSIGNMENT)) words.shift();
+// Programs that run the rest of their arguments as a command.
+const SIMPLE_WRAPPERS = new Set(["command", "nohup", "time", "busybox"]);
+const TIMEOUT_OPTIONS_WITH_VALUE = new Set([
+  "-s",
+  "-k",
+  "--signal",
+  "--kill-after",
+]);
 
-  if (words[0] === "command") words.shift();
-  if (words[0] === "env") {
-    words.shift();
-    while (words[0]?.startsWith("-") || words[0]?.match(ENV_ASSIGNMENT)) {
-      words.shift();
+/** Skips leading option words, consuming a value for the listed options. */
+function skipOptions(
+  words: string[],
+  start: number,
+  withValue: ReadonlySet<string>,
+): number {
+  let index = start;
+  while (words[index]?.startsWith("-")) {
+    index += withValue.has(words[index]) ? 2 : 1;
+  }
+  return index;
+}
+
+/**
+ * Strips variable assignments and wrappers such as `env`, `nice`, `nohup`,
+ * `time`, `timeout`, and `busybox` so the words start at the real command.
+ */
+function normalizeWords(input: string[]): string[] {
+  let words = input;
+  for (;;) {
+    while (words[0]?.match(ENV_ASSIGNMENT)) words = words.slice(1);
+    const head = words[0];
+    if (head === undefined) return words;
+    if (SIMPLE_WRAPPERS.has(head)) {
+      words = words.slice(1);
+    } else if (head === "env") {
+      words = words.slice(skipOptions(words, 1, new Set()));
+    } else if (head === "nice") {
+      words = words.slice(skipOptions(words, 1, new Set(["-n"])));
+    } else if (head === "timeout") {
+      // The word after the options is the duration, not the command.
+      words = words.slice(
+        skipOptions(words, 1, TIMEOUT_OPTIONS_WITH_VALUE) + 1,
+      );
+    } else {
+      return words;
     }
   }
-  return words;
+}
+
+function commandWords(tokens: ShellToken[]): string[] {
+  return normalizeWords(
+    tokens.map(tokenText).filter((token): token is string => token !== null),
+  );
+}
+
+// Options of xargs whose value is a separate word.
+const XARGS_OPTIONS_WITH_VALUE = new Set([
+  "-a",
+  "-d",
+  "-E",
+  "-e",
+  "-I",
+  "-i",
+  "-L",
+  "-l",
+  "-n",
+  "-P",
+  "-s",
+  "--arg-file",
+  "--delimiter",
+  "--eof",
+  "--replace",
+  "--max-lines",
+  "--max-args",
+  "--max-procs",
+  "--max-chars",
+]);
+const FIND_EXEC_ACTIONS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+const MAX_DELEGATIONS = 8;
+
+/** The command words that `find -exec` and friends run per match. */
+function findExecCommands(args: string[]): string[][] {
+  const commands: string[][] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (!FIND_EXEC_ACTIONS.has(args[index])) continue;
+    const words: string[] = [];
+    for (
+      index += 1;
+      index < args.length && args[index] !== ";" && args[index] !== "+";
+      index += 1
+    ) {
+      words.push(args[index]);
+    }
+    if (words.length > 0) commands.push(words);
+  }
+  return commands;
+}
+
+/**
+ * Returns the segment's own command followed by every command it delegates
+ * to through `xargs` or `find -exec`, each normalized like a top-level one.
+ */
+function delegatedCommands(words: string[]): string[][] {
+  const commands: string[][] = [];
+  const queue = [words];
+  while (queue.length > 0 && commands.length < MAX_DELEGATIONS) {
+    const current = normalizeWords(queue.shift() as string[]);
+    if (current.length === 0) continue;
+    commands.push(current);
+    const [name, ...args] = current;
+    if (name === "xargs") {
+      const delegated = args.slice(
+        skipOptions(args, 0, XARGS_OPTIONS_WITH_VALUE),
+      );
+      if (delegated.length > 0) queue.push(delegated);
+    }
+    if (name === "find") queue.push(...findExecCommands(args));
+  }
+  return commands;
+}
+
+/** Command strings that a shell, `su -c`, or `eval` would run. */
+function nestedShellCommands(name: string, args: string[]): string[] {
+  if (name === "eval") return args.length > 0 ? [args.join(" ")] : [];
+  if (SHELL_COMMANDS.has(name) || name === "su") {
+    const commandIndex = args.indexOf("-c");
+    const nested = commandIndex >= 0 ? args[commandIndex + 1] : undefined;
+    return nested ? [nested] : [];
+  }
+  return [];
 }
 
 function parseCommand(
@@ -145,6 +261,13 @@ function isRecursive(args: string[]): boolean {
 
 function isForced(args: string[]): boolean {
   return hasShortFlag(args, "-f") || args.includes("--force");
+}
+
+/** `git restore --staged` without `--worktree` only unstages, which is recoverable. */
+function restoresIndexOnly(rest: string[]): boolean {
+  const staged = rest.includes("--staged") || hasShortFlag(rest, "-S");
+  const worktree = rest.includes("--worktree") || hasShortFlag(rest, "-W");
+  return staged && !worktree;
 }
 
 function diskutilErases(args: string[]): boolean {
@@ -250,7 +373,10 @@ const DOWNLOAD_TO_SHELL: PolicyRule = {
 export const POLICY_RULES: readonly PolicyRule[] = [
   // Privileges
   {
-    match: is("sudo", always("sudo requests elevated privileges")),
+    match: is(
+      ["sudo", "doas", "pkexec", "su"],
+      named((command) => `${command} requests elevated privileges`),
+    ),
     severity: "high",
     headless: true,
   },
@@ -276,6 +402,11 @@ export const POLICY_RULES: readonly PolicyRule[] = [
     ),
     severity: "high",
     headless: false,
+  },
+  {
+    match: is("shred", always("shred destroys file contents beyond recovery")),
+    severity: "high",
+    headless: true,
   },
 
   // Disks and volumes
@@ -482,6 +613,42 @@ export const POLICY_RULES: readonly PolicyRule[] = [
     headless: true,
   },
   {
+    match: git("checkout", (rest) =>
+      rest.includes("--") || rest.includes(".") || isForced(rest)
+        ? "git checkout with a pathspec overwrites working-tree changes"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: git("switch", (rest) =>
+      rest.includes("--discard-changes") || isForced(rest)
+        ? "git switch --discard-changes overwrites working-tree changes"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: git("restore", (rest) =>
+      restoresIndexOnly(rest)
+        ? null
+        : "git restore overwrites working-tree changes",
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: git("stash", (rest) =>
+      ["drop", "clear"].includes(rest[0] ?? "")
+        ? `git stash ${rest[0]} discards stashed changes`
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
     match: git("push", (rest) =>
       isForced(rest) || rest.includes("--force-with-lease")
         ? "forced git push can rewrite remote history"
@@ -527,6 +694,15 @@ export const POLICY_RULES: readonly PolicyRule[] = [
     severity: null,
     headless: true,
   },
+  {
+    match: git("stash", (rest) =>
+      ["drop", "clear"].includes(rest[0] ?? "")
+        ? null
+        : "git stash moves the parent session's working-tree changes",
+    ),
+    severity: null,
+    headless: true,
+  },
 
   // Git: recoverable through the index or reflog, but still worth a look
   {
@@ -542,10 +718,11 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         "restore",
         "revert",
       ],
-      (rest, subcommand) =>
-        subcommand === "reset" && rest.includes("--hard")
-          ? null
-          : `git ${subcommand} changes repository state`,
+      (rest, subcommand) => {
+        if (subcommand === "reset" && rest.includes("--hard")) return null;
+        if (subcommand === "restore" && !restoresIndexOnly(rest)) return null;
+        return `git ${subcommand} changes repository state`;
+      },
     ),
     severity: "medium",
     headless: false,
@@ -638,20 +815,18 @@ function evaluate(
   }
 
   for (const segment of splitCommands(parsed)) {
-    const words = commandWords(segment);
-    if (words.length === 0) continue;
-    const [name, ...args] = words;
+    for (const [name, ...args] of delegatedCommands(commandWords(segment))) {
+      for (const rule of POLICY_RULES) {
+        if (!applies(rule)) continue;
+        const reason = rule.match(name, args);
+        if (reason) matches.push({ rule, reason });
+      }
 
-    for (const rule of POLICY_RULES) {
-      if (!applies(rule)) continue;
-      const reason = rule.match(name, args);
-      if (reason) matches.push({ rule, reason });
-    }
-
-    if (depth < MAX_SHELL_DEPTH && SHELL_COMMANDS.has(name)) {
-      const commandIndex = args.indexOf("-c");
-      const nested = commandIndex >= 0 ? args[commandIndex + 1] : undefined;
-      if (nested) matches.push(...evaluate(nested, depth + 1, applies));
+      if (depth < MAX_SHELL_DEPTH) {
+        for (const nested of nestedShellCommands(name, args)) {
+          matches.push(...evaluate(nested, depth + 1, applies));
+        }
+      }
     }
   }
   return matches;

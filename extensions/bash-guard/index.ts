@@ -79,7 +79,9 @@ export default function bashGuard(pi: ExtensionAPI): void {
     const risk = analyzeBashCommand(command);
     if (!risk) return;
 
-    const previousAbort = recentlyAborted.get(command);
+    // Whitespace changes must not turn an aborted command into a new one.
+    const abortKey = command.replace(/\s+/g, " ").trim();
+    const previousAbort = recentlyAborted.get(abortKey);
     if (
       previousAbort !== undefined &&
       Date.now() - previousAbort.at < ABORT_REMEMBER_MS
@@ -103,7 +105,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
 
     const result = await promptForCommand(ctx, command, risk);
     if (result.run) return;
-    recentlyAborted.set(command, {
+    recentlyAborted.set(abortKey, {
       at: Date.now(),
       rejectReason: result.rejectReason,
     });

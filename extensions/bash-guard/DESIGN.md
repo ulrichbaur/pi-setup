@@ -15,15 +15,19 @@
 - Do not flag what the edit tools already allow. Redirects, `sed -i`,
   and forced copies change files the same way `write` and `edit` do.
 - Do not flag Git operations the index or reflog can undo,
-  such as `add`, `commit`, `checkout`, `merge`, and `pull`.
+  such as `add`, `commit`, branch switches, `merge`, and `pull`.
+  A `checkout`, `switch`, or `restore` that overwrites the working tree
+  is not recoverable and is flagged like `reset --hard`.
 - Parse the command; never match on raw text.
-  Follow `bash -c`, strip `env` and variable prefixes, and inspect
-  every segment of a pipeline or command list.
+  Follow `bash -c`, `eval`, and `su -c`; strip `env`, `nice`, `nohup`,
+  `time`, `timeout`, `busybox`, and variable prefixes; judge the command
+  that `xargs` or `find -exec` runs; and inspect every segment
+  of a pipeline or command list.
 - An unparseable command is flagged. Unknown is not safe.
 - Without a UI the guard fails closed unless the user opted in
   with `--bash-guard-auto-allow`.
-- A command the user aborted is blocked unchanged for one minute,
-  and the abort reason is passed back to the model.
+- A command the user aborted is blocked for one minute, whitespace
+  changes included, and the abort reason is passed back to the model.
 
 ## Headless policy
 
@@ -31,7 +35,7 @@
   formatting, system power, infrastructure teardown, piping downloads
   to a shell.
 - Block operations that belong to the parent session:
-  `git commit`, `git pull`, and `git push`.
+  `git commit`, `git pull`, `git push`, and `git stash`.
 - Everything else runs without confirmation.
   A subagent has no user to ask.
 - The subagents extension reuses this policy in its `safe_bash` tool.

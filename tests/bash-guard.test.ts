@@ -158,6 +158,70 @@ test("overlapping rules produce one reason", () => {
   assert.equal(analyzeBashCommand("kill -9 1")?.reasons.length, 1);
 });
 
+test("working-tree discards are flagged and blocked headless", () => {
+  for (const command of [
+    "git checkout -- .",
+    "git checkout -- src/index.ts",
+    "git checkout -f main",
+    "git switch --discard-changes main",
+    "git restore .",
+    "git restore --staged --worktree file",
+    "git stash drop",
+    "git stash clear",
+  ]) {
+    assert.equal(analyzeBashCommand(command)?.severity, "high", command);
+    assert.ok(headlessBlockReason(command), command);
+  }
+  assert.equal(analyzeBashCommand("git checkout main"), null);
+  assert.equal(analyzeBashCommand("git switch main"), null);
+  assert.equal(analyzeBashCommand("git stash"), null);
+  assert.equal(analyzeBashCommand("git stash pop"), null);
+  assert.deepEqual(analyzeBashCommand("git restore --staged file"), {
+    severity: "medium",
+    reasons: ["git restore changes repository state"],
+  });
+  assert.equal(headlessBlockReason("git restore --staged file"), null);
+  assert.match(headlessBlockReason("git stash") ?? "", /parent session/);
+  assert.match(headlessBlockReason("git stash pop") ?? "", /parent session/);
+});
+
+test("delegated and wrapped commands are judged like direct ones", () => {
+  for (const command of [
+    "ls | xargs rm -rf",
+    "find . -name '*.tmp' -exec rm -rf {} \\;",
+    "find . -type d -execdir rm -r {} +",
+    "eval 'rm -rf build'",
+    "nohup rm -rf build",
+    "nice -n 10 rm -rf build",
+    "timeout -s KILL 10 rm -rf build",
+    "busybox rm -rf build",
+    "xargs -I {} -P 4 sh -c 'rm -rf {}'",
+  ]) {
+    assert.equal(analyzeBashCommand(command)?.severity, "high", command);
+    assert.match(headlessBlockReason(command) ?? "", /recursive/, command);
+  }
+  assert.deepEqual(analyzeBashCommand("su -c 'rm -rf build'")?.reasons, [
+    "su requests elevated privileges",
+    "rm -r performs recursive file deletion",
+  ]);
+  assert.equal(analyzeBashCommand("cat list | xargs echo"), null);
+  assert.equal(analyzeBashCommand("find . -name '*.md' -exec cat {} +"), null);
+  assert.equal(analyzeBashCommand("timeout 10 pnpm test"), null);
+  assert.equal(analyzeBashCommand("time pnpm test"), null);
+  assert.equal(headlessBlockReason("xargs rm"), null);
+  assert.equal(headlessBlockReason("find . -exec rm {} +"), null);
+  assert.equal(analyzeBashCommand("xargs rm")?.severity, "high");
+});
+
+test("unrecoverable deletion and other privilege tools are flagged", () => {
+  assert.equal(analyzeBashCommand("shred -u secrets.txt")?.severity, "high");
+  assert.ok(headlessBlockReason("shred -u secrets.txt"));
+  for (const command of ["doas ls", "pkexec ls", "su root"]) {
+    assert.match(analyzeBashCommand(command)?.reasons[0] ?? "", /privileges/);
+    assert.match(headlessBlockReason(command) ?? "", /privileges/);
+  }
+});
+
 test("headless policy blocks catastrophic and parent-session operations", () => {
   assert.match(headlessBlockReason("rm -rf build") ?? "", /recursive/);
   assert.match(headlessBlockReason("sudo apt update") ?? "", /privileges/);
@@ -268,7 +332,7 @@ test("bash-guard uses RPC confirmation and remembers an abort", async () => {
     /do not change the release commit/,
   );
   assert.match(
-    (await handler(bashCall("git rebase main"), context))?.reason ?? "",
+    (await handler(bashCall("git  rebase   main"), context))?.reason ?? "",
     /aborted recently/,
   );
   assert.match(
