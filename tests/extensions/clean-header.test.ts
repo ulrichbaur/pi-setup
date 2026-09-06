@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { VERSION } from "@earendil-works/pi-coding-agent";
-import { cleanHeaderText } from "../extensions/clean-header.ts";
+import { cleanHeaderText } from "../../extensions/clean-header.ts";
 
 const theme = {
   fg(_color: string, text: string) {

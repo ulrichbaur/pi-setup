@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import skillset, { registerSkillsetFeatures } from "../index.ts";
+import skillset, {
+  registerSkillsetFeatures,
+} from "../../../extensions/skillset/index.ts";
 
 test("the combined extension registers palette and policy features", () => {
   const commands: string[] = [];

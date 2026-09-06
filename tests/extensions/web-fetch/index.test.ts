@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { test } from "node:test";
-import { fetchAndExtract } from "../extensions/web-fetch/index.ts";
+import { fetchAndExtract } from "../../../extensions/web-fetch/index.ts";
 
 function listen(server: ReturnType<typeof createServer>): Promise<number> {
   return new Promise((resolve, reject) => {

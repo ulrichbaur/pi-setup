@@ -11,7 +11,9 @@ const agentDirectory = join(home, ".pi", "agent");
 process.env.HOME = home;
 process.env.PI_CODING_AGENT_DIR = agentDirectory;
 
-const { collectSkillUsage } = await import("../history/sessions.ts");
+const { collectSkillUsage } = await import(
+  "../../../../extensions/skillset/history/sessions.ts"
+);
 
 const sessionsDir = join(agentDirectory, "sessions");
 

@@ -11,8 +11,8 @@ import saveMarkdown, {
   assistantMarkdown,
   latestAssistantMarkdown,
   markdownTarget,
-} from "../extensions/save-md.ts";
-import { withTempDir } from "./helpers.ts";
+} from "../../extensions/save-md.ts";
+import { withTempDir } from "../helpers.ts";
 
 const assistant = (content: unknown): SessionEntry =>
   ({

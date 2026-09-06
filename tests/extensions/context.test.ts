@@ -12,7 +12,7 @@ import contextExtension, {
   type ContextBreakdown,
   computeContextBreakdown,
   renderContextOverlay,
-} from "../extensions/context.ts";
+} from "../../extensions/context.ts";
 
 function entry(type: SessionEntry["type"], value: object): SessionEntry {
   return {

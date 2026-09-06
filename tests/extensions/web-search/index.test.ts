@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildSearchQuery } from "../extensions/web-search/index.ts";
+import { buildSearchQuery } from "../../../extensions/web-search/index.ts";
 
 test("builds a structured Google search query", () => {
   assert.deepEqual(

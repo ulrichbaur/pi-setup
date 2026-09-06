@@ -18,7 +18,7 @@ process.env.HOME = home;
 process.env.PI_CODING_AGENT_DIR = agentDirectory;
 
 const { default: skillPolicy, parseSkillPolicyConfig } = await import(
-  "../policy/policy.ts"
+  "../../../../extensions/skillset/policy/policy.ts"
 );
 
 beforeEach(async () => {

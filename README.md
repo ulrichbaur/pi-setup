@@ -10,7 +10,7 @@ Development requires Node.js 22.6 or newer and the pnpm version pinned in
 - `extensions/` — TypeScript extensions
 - `lib/` — code shared by more than one extension
 - `themes/` — JSON themes
-- `tests/` — tests for extensions and supporting code
+- `tests/` — tests, mirroring the layout of `extensions/` and `lib/`
 
 ## Extensions
 

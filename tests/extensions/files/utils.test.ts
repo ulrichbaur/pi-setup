@@ -23,7 +23,7 @@ import {
   sanitizeReference,
   stripLineSuffix,
   toCanonicalPath,
-} from "../extensions/files/utils.ts";
+} from "../../../extensions/files/utils.ts";
 
 function withTempDir<T>(fn: (dir: string) => T): T {
   const dir = mkdtempSync(path.join(os.tmpdir(), "files-test-"));

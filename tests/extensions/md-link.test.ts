@@ -13,8 +13,8 @@ import markdownLinkExtension, {
   finalAssistantMarkdown,
   linkedMarkdownPath,
   markdownChangeMessage,
-} from "../extensions/md-link.ts";
-import { withTempDir } from "./helpers.ts";
+} from "../../extensions/md-link.ts";
+import { withTempDir } from "../helpers.ts";
 
 function assistantMessage(
   content: AssistantMessage["content"],

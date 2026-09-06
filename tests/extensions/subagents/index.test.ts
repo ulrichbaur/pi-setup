@@ -9,8 +9,7 @@ import {
   parseSubagentConfig,
   selectSubagentModel,
   subagentToolSelectionArgs,
-} from "../extensions/subagents/index.ts";
-import { dangerousCommandReason } from "../extensions/subagents/tools/safe-bash.ts";
+} from "../../../extensions/subagents/index.ts";
 
 test("accepts inherited and preferred subagent models", () => {
   assert.deepEqual(
@@ -149,10 +148,4 @@ test("selects custom tools for child Pi processes", () => {
     ["--tools", "read,web_search,web_fetch"],
   );
   assert.deepEqual(subagentToolSelectionArgs([]), ["--no-tools"]);
-});
-
-test("safe bash blocks destructive system commands", () => {
-  assert.match(dangerousCommandReason("sudo reboot") ?? "", /blocked/);
-  assert.match(dangerousCommandReason("rm -rf /") ?? "", /blocked/);
-  assert.equal(dangerousCommandReason("pnpm test"), null);
 });

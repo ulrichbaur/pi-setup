@@ -8,9 +8,9 @@ import {
   aggregateSkillUsage,
   deduplicateSkillUsageEvents,
   frecencyWeight,
-} from "../history/aggregate.ts";
-import { extractSkillUsageEvents } from "../history/extract.ts";
-import type { SkillUsageEvent } from "../history/types.ts";
+} from "../../../../extensions/skillset/history/aggregate.ts";
+import { extractSkillUsageEvents } from "../../../../extensions/skillset/history/extract.ts";
+import type { SkillUsageEvent } from "../../../../extensions/skillset/history/types.ts";
 
 function skill(name: string, filePath: string): Skill {
   return {

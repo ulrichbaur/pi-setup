@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { SkillUsageEvent } from "../history/types.ts";
+import type { SkillUsageEvent } from "../../../../extensions/skillset/history/types.ts";
 import {
   filterUsageEventsByWindow,
   summarizeUsageByProject,
   summarizeUsageRates,
   type UsageProjectSummary,
   type UsageTrendSummary,
-} from "../usage/usage.ts";
+} from "../../../../extensions/skillset/usage/usage.ts";
 
 function matchesBinding(data: string, binding: string): boolean {
   const keys: Record<string, string[]> = {
@@ -94,7 +94,9 @@ test("summarizeUsageRates returns all periods with fixed daily rates", () => {
 });
 
 test("live usage view derives rows from a no-event loaded inventory", async () => {
-  const { computeUsageView } = await import("../usage/usage-view.ts");
+  const { computeUsageView } = await import(
+    "../../../../extensions/skillset/usage/usage-view.ts"
+  );
   const view = computeUsageView({
     skills: [
       { name: "alpha", filePath: "/skills/alpha/SKILL.md" },
@@ -123,7 +125,7 @@ test("live usage view derives rows from a no-event loaded inventory", async () =
 
 test("live usage view renders all-time usage and navigates skills", async () => {
   const { buildUsageView, computeUsageView } = await import(
-    "../usage/usage-view.ts"
+    "../../../../extensions/skillset/usage/usage-view.ts"
   );
 
   const now = Date.parse("2026-01-31T12:00:00Z");
@@ -256,7 +258,9 @@ test("live usage view renders all-time usage and navigates skills", async () => 
 });
 
 test("the skill list windows around the selection with more skills than fit", async () => {
-  const { buildUsageView } = await import("../usage/usage-view.ts");
+  const { buildUsageView } = await import(
+    "../../../../extensions/skillset/usage/usage-view.ts"
+  );
   const arrowDown = `${String.fromCharCode(27)}[B`;
   const skills = Array.from({ length: 12 }, (_, index) => ({
     name: `skill-${String(index + 1).padStart(2, "0")}`,

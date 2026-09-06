@@ -10,9 +10,11 @@ process.env.HOME = home;
 process.env.PI_CODING_AGENT_DIR = join(home, ".pi", "agent");
 
 const { default: skillPalette, orderSkillsByUsage } = await import(
-  "../palette/palette.ts"
+  "../../../../extensions/skillset/palette/palette.ts"
 );
-const { showSkillPalette } = await import("../palette/palette-menu.ts");
+const { showSkillPalette } = await import(
+  "../../../../extensions/skillset/palette/palette-menu.ts"
+);
 type Skill = Parameters<typeof showSkillPalette>[0][number];
 
 after(async () => {
@@ -208,7 +210,9 @@ test("usage history orders the palette by frecency before it opens", async () =>
 test("a hanging history scan cannot delay the palette beyond its timeout", {
   timeout: 2000,
 }, async () => {
-  const { orderSkillsByFrecency } = await import("../palette/palette.ts");
+  const { orderSkillsByFrecency } = await import(
+    "../../../../extensions/skillset/palette/palette.ts"
+  );
   const alpha = makeSkill("alpha", "/tmp/alpha.md");
   const beta = makeSkill("beta", "/tmp/beta.md");
 
@@ -226,7 +230,9 @@ test("a hanging history scan cannot delay the palette beyond its timeout", {
 test("a timed-out scan reuses the order of the last completed scan", {
   timeout: 2000,
 }, async () => {
-  const { orderSkillsByFrecency } = await import("../palette/palette.ts");
+  const { orderSkillsByFrecency } = await import(
+    "../../../../extensions/skillset/palette/palette.ts"
+  );
   const alpha = makeSkill("alpha", "/tmp/alpha.md");
   const beta = makeSkill("beta", "/tmp/beta.md");
   const skills = [alpha, beta];
@@ -259,7 +265,9 @@ test("a timed-out scan reuses the order of the last completed scan", {
 });
 
 test("a failing history scan falls back to the given skill order", async () => {
-  const { orderSkillsByFrecency } = await import("../palette/palette.ts");
+  const { orderSkillsByFrecency } = await import(
+    "../../../../extensions/skillset/palette/palette.ts"
+  );
   const alpha = makeSkill("alpha", "/tmp/alpha.md");
   const beta = makeSkill("beta", "/tmp/beta.md");
 
