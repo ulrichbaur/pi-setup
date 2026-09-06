@@ -7,6 +7,20 @@ export type BashRisk = {
   reasons: string[];
 };
 
+/**
+ * One row of the shared policy table. The interactive guard and the headless
+ * `safe_bash` tool evaluate the same rows and differ only in which columns
+ * they read.
+ */
+export type PolicyRule = {
+  /** Returns the reason when the rule applies to this command, otherwise null. */
+  match(command: string, args: string[]): string | null;
+  /** Interactive rating. null means the user is not asked. */
+  severity: BashRiskSeverity | null;
+  /** True when a headless worker must never run the command. */
+  headless: boolean;
+};
+
 type OperatorToken = {
   op: string;
   pattern?: string;
@@ -14,10 +28,20 @@ type OperatorToken = {
 
 type ShellToken = string | OperatorToken;
 
+type Match = {
+  rule: PolicyRule;
+  reason: string;
+};
+
 const SHELL_COMMANDS = new Set(["sh", "bash", "zsh", "fish", "dash"]);
 const CONTROL_OPERATORS = new Set(["&&", "||", ";", "&", "|"]);
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const FORK_BOMB_PATTERN = /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/;
+const MAX_SHELL_DEPTH = 2;
+
+// ---------------------------------------------------------------------------
+// Shell parsing
+// ---------------------------------------------------------------------------
 
 function isOperator(token: ShellToken): token is OperatorToken {
   return typeof token === "object" && token !== null && "op" in token;
@@ -59,251 +83,15 @@ function commandWords(tokens: ShellToken[]): string[] {
   return words;
 }
 
-function hasShortFlag(args: string[], flag: string): boolean {
-  const letter = flag.replace(/^-/, "");
-  return args.some(
-    (argument) =>
-      argument === flag ||
-      (argument.startsWith("-") &&
-        !argument.startsWith("--") &&
-        argument.slice(1).includes(letter)),
-  );
-}
-
-function addRisk(
-  risks: BashRisk[],
-  severity: BashRiskSeverity,
-  reason: string,
-): void {
-  risks.push({ severity, reasons: [reason] });
-}
-
-function gitSubcommand(args: string[]): {
-  subcommand: string | undefined;
-  rest: string[];
-} {
-  let index = 0;
-  while (args[index]?.startsWith("-")) {
-    const option = args[index];
-    index += ["-C", "-c", "--git-dir", "--work-tree"].includes(option) ? 2 : 1;
-  }
-  return { subcommand: args[index], rest: args.slice(index + 1) };
-}
-
-function analyzeGit(args: string[], risks: BashRisk[]): void {
-  const { subcommand, rest } = gitSubcommand(args);
-  if (!subcommand) return;
-
-  if (subcommand === "rm") {
-    addRisk(risks, "high", "git rm deletes files and stages their removal");
-    return;
-  }
-  if (subcommand === "reset" && rest.includes("--hard")) {
-    addRisk(risks, "high", "git reset --hard discards working-tree changes");
-    return;
-  }
-  if (
-    subcommand === "clean" &&
-    (hasShortFlag(rest, "-f") || rest.includes("--force"))
-  ) {
-    addRisk(risks, "high", "git clean can permanently delete untracked files");
-    return;
-  }
-  if (
-    subcommand === "push" &&
-    (hasShortFlag(rest, "-f") ||
-      rest.includes("--force") ||
-      rest.includes("--force-with-lease"))
-  ) {
-    addRisk(risks, "high", "forced git push can rewrite remote history");
-    return;
-  }
-  if (subcommand === "reflog" && rest[0] === "expire") {
-    addRisk(risks, "high", "git reflog expire can remove recovery history");
-    return;
-  }
-  if (
-    subcommand === "gc" &&
-    rest.some((argument) => argument.startsWith("--prune"))
-  ) {
-    addRisk(risks, "high", "git gc --prune can delete unreachable objects");
-    return;
-  }
-
-  // Operations that are recoverable through the index or reflog are not listed.
-  const mutating = new Set([
-    "am",
-    "apply",
-    "bisect",
-    "cherry-pick",
-    "notes",
-    "push",
-    "rebase",
-    "reset",
-    "restore",
-    "revert",
-  ]);
-  if (mutating.has(subcommand)) {
-    addRisk(risks, "medium", `git ${subcommand} changes repository state`);
-    return;
-  }
-
-  if (subcommand === "branch") {
-    const mutates = rest.some(
-      (argument) =>
-        !argument.startsWith("-") ||
-        hasShortFlag([argument], "-d") ||
-        hasShortFlag([argument], "-m") ||
-        hasShortFlag([argument], "-c") ||
-        ["--delete", "--move", "--copy"].includes(argument),
-    );
-    if (mutates) {
-      addRisk(risks, "medium", "git branch changes branch references");
-    }
-    return;
-  }
-
-  if (subcommand === "tag") {
-    const readOnly =
-      rest.length === 0 ||
-      rest.every(
-        (argument) =>
-          argument === "-l" ||
-          argument === "--list" ||
-          argument.startsWith("--format"),
-      );
-    if (!readOnly) addRisk(risks, "medium", "git tag changes tag references");
-    return;
-  }
-
-  if (subcommand === "remote") {
-    const action = rest.find((argument) => !argument.startsWith("-"));
-    if (action && !["get-url", "show"].includes(action)) {
-      addRisk(risks, "medium", `git remote ${action} changes remote settings`);
-    }
-    return;
-  }
-
-  if (subcommand === "config") {
-    const readOnly = rest.some(
-      (argument) =>
-        argument === "--get" ||
-        argument === "--get-all" ||
-        argument === "--list" ||
-        argument === "-l",
-    );
-    if (!readOnly) {
-      addRisk(risks, "medium", "git config may change repository settings");
-    }
-    return;
-  }
-
-  if (subcommand === "worktree" && rest[0] !== "list") {
-    addRisk(risks, "medium", "git worktree changes linked working trees");
-  }
-}
-
-function analyzeCommand(
-  tokens: ShellToken[],
-  risks: BashRisk[],
-  depth: number,
-): void {
-  const words = commandWords(tokens);
-  if (words.length === 0) return;
-  const command = words[0];
-  const args = words.slice(1);
-
-  if (command === "sudo") {
-    addRisk(risks, "high", "sudo requests elevated privileges");
-  }
-  if (["rm", "rmdir", "unlink"].includes(command)) {
-    addRisk(risks, "high", `${command} deletes files`);
-  }
-  if (command === "find" && args.includes("-delete")) {
-    addRisk(risks, "high", "find -delete can remove many files");
-  }
-  if (
-    command === "dd" &&
-    (args.some((argument) => argument.startsWith("of=")) || args.includes("of"))
-  ) {
-    addRisk(risks, "high", "dd with an output target can overwrite data");
-  }
-
-  if (command.startsWith("mkfs") || command.startsWith("newfs_")) {
-    addRisk(risks, "high", `${command} formats a filesystem`);
-  }
-  if (
-    [
-      "wipefs",
-      "diskutil",
-      "hdiutil",
-      "gpt",
-      "asr",
-      "parted",
-      "fdisk",
-      "gdisk",
-      "sgdisk",
-      "cryptsetup",
-      "pvcreate",
-      "vgcreate",
-      "lvcreate",
-      "zpool",
-    ].includes(command)
-  ) {
-    addRisk(risks, "high", `${command} manages disks or volumes`);
-  }
-
-  if (
-    (command === "chmod" || command === "chown") &&
-    (args.includes("-R") || args.includes("--recursive"))
-  ) {
-    addRisk(risks, "medium", `${command} recursively changes file metadata`);
-  }
-
-  if (["kill", "pkill", "killall"].includes(command)) {
-    addRisk(
-      risks,
-      args.includes("-9") ? "high" : "medium",
-      `${command} terminates processes`,
-    );
-  }
-  if (["shutdown", "reboot", "halt", "poweroff"].includes(command)) {
-    addRisk(risks, "high", `${command} changes system power state`);
-  }
-  if (
-    command === "systemctl" &&
-    ["stop", "disable", "mask"].includes(args[0] ?? "")
-  ) {
-    addRisk(risks, "medium", `systemctl ${args[0]} disrupts a service`);
-  }
-
-  if (command === "kubectl" && args[0] === "delete") {
-    addRisk(risks, "high", "kubectl delete removes cluster resources");
-  }
-  if (command === "terraform" && args[0] === "destroy") {
-    addRisk(risks, "high", "terraform destroy removes infrastructure");
-  }
-  if (
-    command === "aws" &&
-    args[0] === "s3" &&
-    args[1] === "rm" &&
-    args.includes("--recursive")
-  ) {
-    addRisk(risks, "high", "aws s3 rm --recursive deletes many objects");
-  }
-  if (command === "gcloud" && args.includes("delete")) {
-    addRisk(risks, "high", "gcloud delete removes cloud resources");
-  }
-
-  if (command === "git") analyzeGit(args, risks);
-
-  if (depth < 2 && SHELL_COMMANDS.has(command)) {
-    const commandIndex = args.indexOf("-c");
-    const nested = commandIndex >= 0 ? args[commandIndex + 1] : undefined;
-    if (nested) {
-      const nestedRisk = analyzeBashCommand(nested, depth + 1);
-      if (nestedRisk) risks.push(nestedRisk);
-    }
+function parseCommand(
+  command: string,
+): ShellToken[] | "fork bomb" | "parse error" {
+  const normalized = command.replace(/\\\n/g, " ");
+  if (FORK_BOMB_PATTERN.test(normalized)) return "fork bomb";
+  try {
+    return parseShell(normalized) as ShellToken[];
+  } catch {
+    return "parse error";
   }
 }
 
@@ -332,27 +120,552 @@ function downloadsArePipedToShell(tokens: ShellToken[]): boolean {
   return finishCommand(false);
 }
 
-function deduplicateRisk(risks: BashRisk[]): BashRisk | null {
-  const reasons = [...new Set(risks.flatMap((risk) => risk.reasons))];
+// ---------------------------------------------------------------------------
+// Argument helpers
+// ---------------------------------------------------------------------------
+
+function hasShortFlag(args: string[], flag: string): boolean {
+  const letter = flag.replace(/^-/, "");
+  return args.some(
+    (argument) =>
+      argument === flag ||
+      (argument.startsWith("-") &&
+        !argument.startsWith("--") &&
+        argument.slice(1).includes(letter)),
+  );
+}
+
+function isRecursive(args: string[]): boolean {
+  return (
+    hasShortFlag(args, "-r") ||
+    hasShortFlag(args, "-R") ||
+    args.includes("--recursive")
+  );
+}
+
+function isForced(args: string[]): boolean {
+  return hasShortFlag(args, "-f") || args.includes("--force");
+}
+
+function diskutilErases(args: string[]): boolean {
+  return args.some((argument) =>
+    ["erase", "zerodisk", "secureerase", "reformat"].some((action) =>
+      argument.toLowerCase().startsWith(action),
+    ),
+  );
+}
+
+/** True for the metadata changes that can make a machine unusable. */
+function changesFilesystemRoot(command: string, args: string[]): boolean {
+  if (!args.includes("/")) return false;
+  return command === "chown" || args.includes("777");
+}
+
+function gitSubcommand(args: string[]): {
+  subcommand: string | undefined;
+  rest: string[];
+} {
+  let index = 0;
+  while (args[index]?.startsWith("-")) {
+    const option = args[index];
+    index += ["-C", "-c", "--git-dir", "--work-tree"].includes(option) ? 2 : 1;
+  }
+  return { subcommand: args[index], rest: args.slice(index + 1) };
+}
+
+// ---------------------------------------------------------------------------
+// Rule constructors
+// ---------------------------------------------------------------------------
+
+type CommandSelector =
+  | string
+  | readonly string[]
+  | ((command: string) => boolean);
+type Matcher = PolicyRule["match"];
+
+function selects(selector: CommandSelector, command: string): boolean {
+  if (typeof selector === "string") return selector === command;
+  if (typeof selector === "function") return selector(command);
+  return selector.includes(command);
+}
+
+/** Matches a command by name and derives the reason from its arguments. */
+function is(
+  selector: CommandSelector,
+  reason: (args: string[], command: string) => string | null,
+): Matcher {
+  return (command, args) =>
+    selects(selector, command) ? reason(args, command) : null;
+}
+
+/** Matches a Git subcommand and derives the reason from its remaining arguments. */
+function git(
+  selector: CommandSelector,
+  reason: (rest: string[], subcommand: string) => string | null,
+): Matcher {
+  return (command, args) => {
+    if (command !== "git") return null;
+    const { subcommand, rest } = gitSubcommand(args);
+    if (!subcommand || !selects(selector, subcommand)) return null;
+    return reason(rest, subcommand);
+  };
+}
+
+const always = (reason: string) => () => reason;
+const named =
+  (template: (command: string) => string) => (_: string[], command: string) =>
+    template(command);
+
+// ---------------------------------------------------------------------------
+// Whole-command rules
+// ---------------------------------------------------------------------------
+
+// These rules judge the command text or pipeline shape rather than one segment.
+const FORK_BOMB: PolicyRule = {
+  match: () => "the command contains a fork bomb",
+  severity: "high",
+  headless: true,
+};
+const UNPARSEABLE: PolicyRule = {
+  match: () => "the shell command could not be parsed safely",
+  severity: "medium",
+  headless: true,
+};
+const DOWNLOAD_TO_SHELL: PolicyRule = {
+  match: () => "downloaded content is piped to a shell",
+  severity: "high",
+  headless: true,
+};
+
+// ---------------------------------------------------------------------------
+// Per-command rules
+// ---------------------------------------------------------------------------
+
+/**
+ * Every row applies to one command segment after env prefixes are stripped.
+ * A row with `severity: null` is invisible to the interactive guard.
+ * A row with `headless: false` is allowed for a headless worker.
+ * Rows are ordered so that the more specific reason comes first.
+ */
+export const POLICY_RULES: readonly PolicyRule[] = [
+  // Privileges
+  {
+    match: is("sudo", always("sudo requests elevated privileges")),
+    severity: "high",
+    headless: true,
+  },
+
+  // File deletion
+  {
+    match: is("rm", (args) =>
+      isRecursive(args) ? "rm -r performs recursive file deletion" : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is(["rm", "rmdir", "unlink"], (args, command) =>
+      command === "rm" && isRecursive(args) ? null : `${command} deletes files`,
+    ),
+    severity: "high",
+    headless: false,
+  },
+  {
+    match: is("find", (args) =>
+      args.includes("-delete") ? "find -delete can remove many files" : null,
+    ),
+    severity: "high",
+    headless: false,
+  },
+
+  // Disks and volumes
+  {
+    match: is("dd", (args) =>
+      args.some((argument) => argument.startsWith("of=/dev/"))
+        ? "dd writes to a raw disk"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("dd", (args) =>
+      args.some(
+        (argument) =>
+          argument.startsWith("of=") && !argument.startsWith("of=/dev/"),
+      )
+        ? "dd with an output target can overwrite data"
+        : null,
+    ),
+    severity: "high",
+    headless: false,
+  },
+  {
+    match: is(
+      (command) => command.startsWith("mkfs") || command.startsWith("newfs_"),
+      named((command) => `${command} formats a filesystem`),
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("wipefs", always("wipefs removes disk signatures")),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("diskutil", (args) =>
+      diskutilErases(args) ? "diskutil erases a disk" : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is(
+      ["diskutil", "hdiutil", "gpt", "asr", "pvcreate", "vgcreate", "lvcreate"],
+      (args, command) =>
+        command === "diskutil" && diskutilErases(args)
+          ? null
+          : `${command} manages disks or volumes`,
+    ),
+    severity: "high",
+    headless: false,
+  },
+  {
+    match: is(
+      ["parted", "fdisk", "gdisk", "sgdisk"],
+      named((command) => `${command} manages partition tables`),
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("cryptsetup", always("cryptsetup manages disk encryption")),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("zpool", always("zpool manages ZFS pools")),
+    severity: "high",
+    headless: true,
+  },
+
+  // File metadata
+  {
+    match: is("chmod", (args) =>
+      isRecursive(args) && changesFilesystemRoot("chmod", args)
+        ? "chmod sets world-writable permissions on the filesystem root"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("chown", (args) =>
+      isRecursive(args) && changesFilesystemRoot("chown", args)
+        ? "chown recursively changes ownership of the filesystem root"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is(["chmod", "chown"], (args, command) =>
+      isRecursive(args) && !changesFilesystemRoot(command, args)
+        ? `${command} recursively changes file metadata`
+        : null,
+    ),
+    severity: "medium",
+    headless: false,
+  },
+
+  // Processes and power
+  {
+    match: is("kill", (args) =>
+      args.includes("-9") && args.includes("1")
+        ? "kill -9 1 terminates the init process"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is(["kill", "pkill", "killall"], (args, command) =>
+      args.includes("-9") && !(command === "kill" && args.includes("1"))
+        ? `${command} -9 terminates processes`
+        : null,
+    ),
+    severity: "high",
+    headless: false,
+  },
+  {
+    match: is(["kill", "pkill", "killall"], (args, command) =>
+      args.includes("-9") ? null : `${command} terminates processes`,
+    ),
+    severity: "medium",
+    headless: false,
+  },
+  {
+    match: is(
+      ["shutdown", "reboot", "halt", "poweroff"],
+      named((command) => `${command} changes system power state`),
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("systemctl", (args) =>
+      ["stop", "disable", "mask"].includes(args[0] ?? "")
+        ? `systemctl ${args[0]} disrupts a service`
+        : null,
+    ),
+    severity: "medium",
+    headless: false,
+  },
+
+  // Infrastructure
+  {
+    match: is("kubectl", (args) =>
+      args.includes("delete")
+        ? "kubectl delete removes cluster resources"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("terraform", (args) =>
+      args[0] === "destroy" ? "terraform destroy removes infrastructure" : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("aws", (args) =>
+      args[0] === "s3" && args[1] === "rm" && args.includes("--recursive")
+        ? "aws s3 rm --recursive deletes many objects"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: is("gcloud", (args) =>
+      args.includes("delete") ? "gcloud delete removes cloud resources" : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+
+  // Git: hard to recover
+  {
+    match: git("rm", always("git rm deletes files and stages their removal")),
+    severity: "high",
+    headless: false,
+  },
+  {
+    match: git("reset", (rest) =>
+      rest.includes("--hard")
+        ? "git reset --hard discards working-tree changes"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: git("clean", (rest) =>
+      isForced(rest)
+        ? "git clean can permanently delete untracked files"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: git("push", (rest) =>
+      isForced(rest) || rest.includes("--force-with-lease")
+        ? "forced git push can rewrite remote history"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: git("reflog", (rest) =>
+      rest[0] === "expire"
+        ? "git reflog expire can remove recovery history"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+  {
+    match: git("gc", (rest) =>
+      rest.some((argument) => argument.startsWith("--prune"))
+        ? "git gc --prune can delete unreachable objects"
+        : null,
+    ),
+    severity: "high",
+    headless: true,
+  },
+
+  // Git: parent-session operations
+  {
+    match: git("push", (rest) =>
+      isForced(rest) || rest.includes("--force-with-lease")
+        ? null
+        : "git push publishes to a remote (a parent-session operation)",
+    ),
+    severity: "medium",
+    headless: true,
+  },
+  {
+    match: git(
+      ["commit", "pull"],
+      (_, subcommand) => `git ${subcommand} is a parent-session operation`,
+    ),
+    severity: null,
+    headless: true,
+  },
+
+  // Git: recoverable through the index or reflog, but still worth a look
+  {
+    match: git(
+      [
+        "am",
+        "apply",
+        "bisect",
+        "cherry-pick",
+        "notes",
+        "rebase",
+        "reset",
+        "restore",
+        "revert",
+      ],
+      (rest, subcommand) =>
+        subcommand === "reset" && rest.includes("--hard")
+          ? null
+          : `git ${subcommand} changes repository state`,
+    ),
+    severity: "medium",
+    headless: false,
+  },
+  {
+    match: git("branch", (rest) =>
+      rest.some(
+        (argument) =>
+          !argument.startsWith("-") ||
+          hasShortFlag([argument], "-d") ||
+          hasShortFlag([argument], "-m") ||
+          hasShortFlag([argument], "-c") ||
+          ["--delete", "--move", "--copy"].includes(argument),
+      )
+        ? "git branch changes branch references"
+        : null,
+    ),
+    severity: "medium",
+    headless: false,
+  },
+  {
+    match: git("tag", (rest) =>
+      rest.length === 0 ||
+      rest.every(
+        (argument) =>
+          argument === "-l" ||
+          argument === "--list" ||
+          argument.startsWith("--format"),
+      )
+        ? null
+        : "git tag changes tag references",
+    ),
+    severity: "medium",
+    headless: false,
+  },
+  {
+    match: git("remote", (rest) => {
+      const action = rest.find((argument) => !argument.startsWith("-"));
+      return action && !["get-url", "show"].includes(action)
+        ? `git remote ${action} changes remote settings`
+        : null;
+    }),
+    severity: "medium",
+    headless: false,
+  },
+  {
+    match: git("config", (rest) =>
+      rest.some((argument) =>
+        ["--get", "--get-all", "--list", "-l"].includes(argument),
+      )
+        ? null
+        : "git config may change repository settings",
+    ),
+    severity: "medium",
+    headless: false,
+  },
+  {
+    match: git("worktree", (rest) =>
+      rest[0] === "list" ? null : "git worktree changes linked working trees",
+    ),
+    severity: "medium",
+    headless: false,
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Evaluation
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses the command and returns every matching rule the caller cares about.
+ * Both policies share this walk; they differ only in the `applies` filter and
+ * in how they summarize the matches.
+ */
+function evaluate(
+  command: string,
+  depth: number,
+  applies: (rule: PolicyRule) => boolean,
+): Match[] {
+  const structural = (rule: PolicyRule): Match[] =>
+    applies(rule) ? [{ rule, reason: rule.match("", []) ?? "" }] : [];
+
+  const parsed = parseCommand(command);
+  if (parsed === "fork bomb") return structural(FORK_BOMB);
+  if (parsed === "parse error") return structural(UNPARSEABLE);
+
+  const matches: Match[] = [];
+  if (downloadsArePipedToShell(parsed)) {
+    matches.push(...structural(DOWNLOAD_TO_SHELL));
+  }
+
+  for (const segment of splitCommands(parsed)) {
+    const words = commandWords(segment);
+    if (words.length === 0) continue;
+    const [name, ...args] = words;
+
+    for (const rule of POLICY_RULES) {
+      if (!applies(rule)) continue;
+      const reason = rule.match(name, args);
+      if (reason) matches.push({ rule, reason });
+    }
+
+    if (depth < MAX_SHELL_DEPTH && SHELL_COMMANDS.has(name)) {
+      const commandIndex = args.indexOf("-c");
+      const nested = commandIndex >= 0 ? args[commandIndex + 1] : undefined;
+      if (nested) matches.push(...evaluate(nested, depth + 1, applies));
+    }
+  }
+  return matches;
+}
+
+function summarizeRisk(matches: Match[]): BashRisk | null {
+  const reasons = [...new Set(matches.map((match) => match.reason))];
   if (reasons.length === 0) return null;
   return {
-    severity: risks.some((risk) => risk.severity === "high")
+    severity: matches.some((match) => match.rule.severity === "high")
       ? "high"
       : "medium",
     reasons,
   };
-}
-
-function parseCommand(
-  command: string,
-): ShellToken[] | "fork bomb" | "parse error" {
-  const normalized = command.replace(/\\\n/g, " ");
-  if (FORK_BOMB_PATTERN.test(normalized)) return "fork bomb";
-  try {
-    return parseShell(normalized) as ShellToken[];
-  } catch {
-    return "parse error";
-  }
 }
 
 /** Analyze an agent-issued bash command using the balanced interactive policy. */
@@ -360,151 +673,12 @@ export function analyzeBashCommand(
   command: string,
   depth = 0,
 ): BashRisk | null {
-  const parsed = parseCommand(command);
-  if (typeof parsed === "string") {
-    return parsed === "fork bomb"
-      ? { severity: "high", reasons: ["the command contains a fork bomb"] }
-      : {
-          severity: "medium",
-          reasons: ["the shell command could not be parsed safely"],
-        };
-  }
-
-  const risks: BashRisk[] = [];
-  if (downloadsArePipedToShell(parsed)) {
-    addRisk(risks, "high", "downloaded content is piped to a shell");
-  }
-
-  for (const segment of splitCommands(parsed)) {
-    analyzeCommand(segment, risks, depth);
-  }
-  return deduplicateRisk(risks);
-}
-
-function headlessCommandReason(
-  tokens: ShellToken[],
-  depth: number,
-): string | null {
-  const words = commandWords(tokens);
-  if (words.length === 0) return null;
-  const command = words[0];
-  const args = words.slice(1);
-
-  if (command === "sudo") return "elevated privileges";
-  if (
-    command === "chmod" &&
-    (hasShortFlag(args, "-R") || args.includes("--recursive")) &&
-    args.includes("777") &&
-    args.includes("/")
-  ) {
-    return "world-writable permissions on the filesystem root";
-  }
-  if (
-    command === "chown" &&
-    (hasShortFlag(args, "-R") || args.includes("--recursive")) &&
-    args.includes("/")
-  ) {
-    return "recursive ownership change on the filesystem root";
-  }
-  if (command === "kill" && args.includes("-9") && args.includes("1")) {
-    return "terminating the init process";
-  }
-  if (
-    command === "rm" &&
-    (hasShortFlag(args, "-r") || args.includes("--recursive"))
-  ) {
-    return "recursive file deletion";
-  }
-  if (command.startsWith("mkfs") || command.startsWith("newfs_")) {
-    return "filesystem formatting";
-  }
-  if (command === "wipefs") return "disk signature removal";
-  if (
-    command === "diskutil" &&
-    args.some((argument) =>
-      ["erase", "zerodisk", "secureerase", "reformat"].some((action) =>
-        argument.toLowerCase().startsWith(action),
-      ),
-    )
-  ) {
-    return "destructive disk operation";
-  }
-  if (
-    command === "dd" &&
-    args.some((argument) => argument.startsWith("of=/dev/"))
-  ) {
-    return "raw disk write";
-  }
-  if (["parted", "fdisk", "gdisk", "sgdisk"].includes(command)) {
-    return "partition table management";
-  }
-  if (command === "cryptsetup") return "disk encryption management";
-  if (command === "zpool") return "ZFS pool management";
-  if (["shutdown", "reboot", "halt", "poweroff"].includes(command)) {
-    return "system power operation";
-  }
-  if (command === "terraform" && args[0] === "destroy") {
-    return "infrastructure teardown";
-  }
-  if (command === "kubectl" && args.includes("delete")) {
-    return "Kubernetes resource deletion";
-  }
-  if (
-    command === "aws" &&
-    args[0] === "s3" &&
-    args[1] === "rm" &&
-    args.includes("--recursive")
-  ) {
-    return "bulk S3 deletion";
-  }
-
-  if (command === "git") {
-    const { subcommand, rest } = gitSubcommand(args);
-    if (["commit", "pull", "push"].includes(subcommand ?? "")) {
-      return `git ${subcommand} is a parent-session operation`;
-    }
-    if (subcommand === "reset" && rest.includes("--hard")) {
-      return "discarding uncommitted changes";
-    }
-    if (
-      subcommand === "clean" &&
-      (hasShortFlag(rest, "-f") || rest.includes("--force"))
-    ) {
-      return "deleting untracked files";
-    }
-    if (subcommand === "reflog" && rest[0] === "expire") {
-      return "removing recovery history";
-    }
-    if (
-      subcommand === "gc" &&
-      rest.some((argument) => argument.startsWith("--prune"))
-    ) {
-      return "pruning unreachable Git objects";
-    }
-  }
-
-  if (depth < 2 && SHELL_COMMANDS.has(command)) {
-    const commandIndex = args.indexOf("-c");
-    const nested = commandIndex >= 0 ? args[commandIndex + 1] : undefined;
-    if (nested) return headlessBlockReason(nested, depth + 1);
-  }
-  return null;
+  return summarizeRisk(
+    evaluate(command, depth, (rule) => rule.severity !== null),
+  );
 }
 
 /** Return why a command is forbidden in a non-interactive worker. */
 export function headlessBlockReason(command: string, depth = 0): string | null {
-  const parsed = parseCommand(command);
-  if (typeof parsed === "string") {
-    return parsed === "fork bomb"
-      ? "fork bomb"
-      : "the shell command could not be parsed safely";
-  }
-  if (downloadsArePipedToShell(parsed)) {
-    return "downloaded content piped to a shell";
-  }
-  for (const segment of splitCommands(parsed)) {
-    const reason = headlessCommandReason(segment, depth);
-    if (reason) return reason;
-  }
-  return null;
+  return evaluate(command, depth, (rule) => rule.headless)[0]?.reason ?? null;
 }

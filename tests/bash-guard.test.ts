@@ -9,6 +9,7 @@ import bashGuard from "../extensions/bash-guard/index.ts";
 import {
   analyzeBashCommand,
   headlessBlockReason,
+  POLICY_RULES,
 } from "../extensions/bash-guard/policy.ts";
 import { BashReviewComponent } from "../extensions/bash-guard/review.ts";
 
@@ -110,6 +111,51 @@ test("balanced policy flags state-changing commands", () => {
   );
   assert.equal(analyzeBashCommand('bash -c "rm -rf build"')?.severity, "high");
   assert.equal(analyzeBashCommand(":(){ :|:& };:")?.severity, "high");
+});
+
+test("every policy rule is visible to at least one policy", () => {
+  for (const rule of POLICY_RULES) {
+    assert.ok(rule.severity !== null || rule.headless);
+  }
+});
+
+test("both policies read the same rule for the same command", () => {
+  assert.equal(
+    analyzeBashCommand("kubectl -n apps delete pod web")?.severity,
+    "high",
+  );
+  assert.match(
+    headlessBlockReason("kubectl -n apps delete pod web") ?? "",
+    /cluster resources/,
+  );
+  assert.equal(
+    analyzeBashCommand("gcloud compute instances delete vm")?.severity,
+    "high",
+  );
+  assert.match(
+    headlessBlockReason("gcloud compute instances delete vm") ?? "",
+    /cloud resources/,
+  );
+});
+
+test("overlapping rules produce one reason", () => {
+  assert.deepEqual(analyzeBashCommand("git reset --hard HEAD~1"), {
+    severity: "high",
+    reasons: ["git reset --hard discards working-tree changes"],
+  });
+  assert.deepEqual(analyzeBashCommand("diskutil eraseDisk JHFS+ X disk2"), {
+    severity: "high",
+    reasons: ["diskutil erases a disk"],
+  });
+  assert.deepEqual(analyzeBashCommand("chmod -R 755 /"), {
+    severity: "medium",
+    reasons: ["chmod recursively changes file metadata"],
+  });
+  assert.deepEqual(analyzeBashCommand("chmod -R 777 /"), {
+    severity: "high",
+    reasons: ["chmod sets world-writable permissions on the filesystem root"],
+  });
+  assert.equal(analyzeBashCommand("kill -9 1")?.reasons.length, 1);
 });
 
 test("headless policy blocks catastrophic and parent-session operations", () => {

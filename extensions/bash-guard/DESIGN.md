@@ -2,6 +2,10 @@
 
 - Interactive policy: which commands the user confirms before they run.
 - Headless policy: which commands a subagent may never run.
+- Both policies are columns of one rule table in `policy.ts`.
+  Each row matches one command shape, carries an interactive severity
+  (or none), and says whether a headless worker may run it.
+  Add a command once and decide both answers in the same place.
 
 ## Interactive policy
 
