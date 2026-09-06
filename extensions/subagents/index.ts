@@ -97,20 +97,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function positiveInteger(value: unknown, field: string): number {
+export const DEFAULT_CONFIG: SubagentConfig = {
+  maxConcurrency: 4,
+  maxParallelTasks: 8,
+  agents: {},
+};
+
+function positiveInteger(
+  value: unknown,
+  field: string,
+  fallback: number,
+): number {
+  if (value === undefined) return fallback;
   if (!Number.isInteger(value) || (value as number) < 1) {
     throw new Error(`${CONFIG_PATH}: ${field} must be a positive integer`);
   }
   return value as number;
 }
 
+/** Validates an optional config; omitted fields take the built-in defaults. */
 export function parseSubagentConfig(value: unknown): SubagentConfig {
-  if (!isRecord(value) || !isRecord(value.agents)) {
-    throw new Error(`${CONFIG_PATH}: expected an object with an agents object`);
+  if (!isRecord(value)) {
+    throw new Error(`${CONFIG_PATH}: expected a JSON object`);
+  }
+  const agentValues = value.agents ?? {};
+  if (!isRecord(agentValues)) {
+    throw new Error(`${CONFIG_PATH}: agents must be an object`);
   }
 
   const agents: Record<string, AgentModelConfig> = {};
-  for (const [name, agentValue] of Object.entries(value.agents)) {
+  for (const [name, agentValue] of Object.entries(agentValues)) {
     if (!isRecord(agentValue)) {
       throw new Error(`${CONFIG_PATH}: agents.${name} must be an object`);
     }
@@ -136,19 +152,22 @@ export function parseSubagentConfig(value: unknown): SubagentConfig {
   }
 
   return {
-    maxConcurrency: positiveInteger(value.maxConcurrency, "maxConcurrency"),
+    maxConcurrency: positiveInteger(
+      value.maxConcurrency,
+      "maxConcurrency",
+      DEFAULT_CONFIG.maxConcurrency,
+    ),
     maxParallelTasks: positiveInteger(
       value.maxParallelTasks,
       "maxParallelTasks",
+      DEFAULT_CONFIG.maxParallelTasks,
     ),
     agents,
   };
 }
 
 function loadConfig(): SubagentConfig {
-  if (!existsSync(CONFIG_PATH)) {
-    throw new Error(`Missing required subagent config: ${CONFIG_PATH}`);
-  }
+  if (!existsSync(CONFIG_PATH)) return DEFAULT_CONFIG;
   try {
     return parseSubagentConfig(JSON.parse(readFileSync(CONFIG_PATH, "utf8")));
   } catch (error) {
@@ -197,12 +216,7 @@ function loadAgents(config: SubagentConfig): AgentDefinition[] {
       ) {
         return null;
       }
-      const configured = config.agents[frontmatter.name];
-      if (!configured) {
-        throw new Error(
-          `${CONFIG_PATH}: missing agents.${frontmatter.name} for ${name}`,
-        );
-      }
+      const configured = config.agents[frontmatter.name] ?? { models: [] };
       const tools = assertSupportedTools(name, parseTools(frontmatter.tools));
       return {
         name: frontmatter.name,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   assertSupportedTools,
+  DEFAULT_CONFIG,
   parseSubagentConfig,
   selectSubagentModel,
   subagentToolSelectionArgs,
@@ -50,7 +51,24 @@ test("rejects the raw bash tool in agent definitions", () => {
   );
 });
 
-test("rejects incomplete subagent limits", () => {
+test("fills omitted subagent config fields with defaults", () => {
+  assert.deepEqual(parseSubagentConfig({}), DEFAULT_CONFIG);
+  assert.deepEqual(
+    parseSubagentConfig({ agents: { worker: { models: ["a/b"] } } }),
+    {
+      maxConcurrency: DEFAULT_CONFIG.maxConcurrency,
+      maxParallelTasks: DEFAULT_CONFIG.maxParallelTasks,
+      agents: { worker: { models: ["a/b"] } },
+    },
+  );
+  assert.throws(() => parseSubagentConfig([]), /expected a JSON object/);
+  assert.throws(
+    () => parseSubagentConfig({ agents: [] }),
+    /agents must be an object/,
+  );
+});
+
+test("rejects invalid subagent limits", () => {
   assert.throws(
     () =>
       parseSubagentConfig({

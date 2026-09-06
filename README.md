@@ -152,11 +152,12 @@ The researcher receives only the web tools.
 The worker receives file tools and `safe_bash`, which blocks common destructive system commands.
 Agent definitions cannot request the raw `bash` tool.
 
-`extensions/subagents/config.json` is required.
+`extensions/subagents/config.json` is optional and overrides the built-in
+defaults: concurrency 4, at most 8 parallel tasks, and no model preferences.
 Each agent may set a `models` array of `provider/model` IDs there.
 The first available preferred model is selected. An agent without an available
 preferred model inherits the parent model and thinking level.
-The same file controls concurrency and the maximum parallel task count.
+A config entry for an agent without a matching agent file is an error.
 
 ## Develop locally
 
