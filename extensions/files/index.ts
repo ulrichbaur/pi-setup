@@ -1,8 +1,7 @@
 /**
- * Files Extension (simplified)
- *
- * /files command lists files in the current git tree (plus session-referenced files)
- * and offers quick actions: add to prompt or copy path.
+ * `/files` and ctrl+shift+o: one fuzzy-searchable list over the Git tree
+ * and the files mentioned or changed in the session. Selecting a file adds
+ * an `@path` mention to the prompt or copies the path.
  */
 
 import path from "node:path";
@@ -13,30 +12,17 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   copyToClipboard,
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
   DynamicBorder,
-  getMarkdownTheme,
-  truncateHead,
 } from "@earendil-works/pi-coding-agent";
 import {
   Container,
   fuzzyFilter,
   Input,
-  Key,
-  Markdown,
-  matchesKey,
   type SelectItem,
   SelectList,
   Spacer,
   Text,
 } from "@earendil-works/pi-tui";
-import {
-  type FileChangeTracker,
-  type RevertChangesResult,
-  registerFileChangeTracking,
-  type TrackedFileChange,
-} from "./changes.ts";
 import {
   collectSessionFileChanges,
   extractFileReferencesFromEntry,
@@ -59,11 +45,7 @@ type FileEntry = {
   isReferenced: boolean;
   hasSessionChange: boolean;
   lastTimestamp: number;
-  piChange?: TrackedFileChange;
 };
-
-const ACCEPT_ALL = "__files_accept_all_pi_changes__";
-const REVERT_ALL = "__files_revert_all_pi_changes__";
 
 /** Most recent session file references first, deduplicated, as normalized absolute paths. */
 const collectRecentFileReferences = (
@@ -161,7 +143,6 @@ const isInRepo = (gitRoot: string | null, canonicalPath: string): boolean => {
 const buildFileEntries = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  changeTracker: FileChangeTracker,
 ): Promise<{ files: FileEntry[]; gitRoot: string | null }> => {
   const entries = ctx.sessionManager.getBranch();
   const sessionChanges = collectSessionFileChanges(entries, ctx.cwd);
@@ -199,7 +180,6 @@ const buildFileEntries = async (
       isReferenced: data.isReferenced ?? false,
       hasSessionChange: data.hasSessionChange ?? false,
       lastTimestamp: data.lastTimestamp ?? 0,
-      piChange: data.piChange,
     });
   };
   for (const file of gitFiles) {
@@ -246,18 +226,6 @@ const buildFileEntries = async (
       lastTimestamp: change.lastTimestamp,
     });
   }
-  for (const change of changeTracker.list()) {
-    const canonical = toCanonicalPath(change.absolutePath);
-    upsertFile({
-      canonicalPath: canonical.canonicalPath,
-      isDirectory: canonical.isDirectory,
-      status: statusMap.get(canonical.canonicalPath)?.status,
-      inRepo: isInRepo(gitRoot, canonical.canonicalPath),
-      hasSessionChange: true,
-      lastTimestamp: change.updatedAt,
-      piChange: change,
-    });
-  }
   const files = Array.from(fileMap.values()).sort((a, b) => {
     const aDirty = Boolean(a.status),
       bDirty = Boolean(b.status);
@@ -300,36 +268,16 @@ const copyPathToClipboard = (
 const showFileSelector = async (
   ctx: ExtensionContext,
   files: FileEntry[],
-  trackedCount: number,
   selectedPath?: string | null,
 ): Promise<string | null> => {
-  const items: SelectItem[] = [
-    ...(trackedCount > 0
-      ? [
-          {
-            value: ACCEPT_ALL,
-            label: `Accept all Pi changes (${trackedCount})`,
-            description: "Keep files and clear rollback snapshots",
-          },
-          {
-            value: REVERT_ALL,
-            label: `Revert all safe Pi changes (${trackedCount})`,
-            description: "Skip files with external edits",
-          },
-        ]
-      : []),
-    ...files.map((file) => {
-      const directoryLabel = file.isDirectory ? " [directory]" : "";
-      const statusSuffix = file.status ? ` [${file.status}]` : "";
-      const changeSuffix = file.piChange
-        ? ` [Pi +${file.piChange.added}/-${file.piChange.removed}${file.piChange.conflict ? ", conflict" : ""}]`
-        : "";
-      return {
-        value: file.canonicalPath,
-        label: `${file.displayPath}${directoryLabel}${statusSuffix}${changeSuffix}`,
-      };
-    }),
-  ];
+  const items: SelectItem[] = files.map((file) => {
+    const directoryLabel = file.isDirectory ? " [directory]" : "";
+    const statusSuffix = file.status ? ` [${file.status}]` : "";
+    return {
+      value: file.canonicalPath,
+      label: `${file.displayPath}${directoryLabel}${statusSuffix}`,
+    };
+  });
   const selection = await ctx.ui.custom<string | null>(
     (tui, theme, keybindings, done) => {
       const container = new Container();
@@ -423,87 +371,6 @@ const showFileSelector = async (
   return selection;
 };
 
-const showChangeDiff = async (
-  ctx: ExtensionContext,
-  change: TrackedFileChange,
-): Promise<void> => {
-  const truncated = truncateHead(change.diff, {
-    maxBytes: DEFAULT_MAX_BYTES,
-    maxLines: DEFAULT_MAX_LINES,
-  });
-  const conflict = change.conflict
-    ? "\n\n> External edits detected. Safe revert is disabled for this file."
-    : "";
-  const truncation = truncated.truncated
-    ? "\n\n> Diff truncated to Pi's standard output limits."
-    : "";
-  const markdown = `\`\`\`diff\n${truncated.content.trimEnd()}\n\`\`\`${conflict}${truncation}`;
-
-  await ctx.ui.custom<void>(
-    (_tui, theme, _keybindings, done) => {
-      const container = new Container();
-      container.addChild(new DynamicBorder((text) => theme.fg("accent", text)));
-      container.addChild(
-        new Text(theme.fg("accent", theme.bold(change.displayPath)), 1, 0),
-      );
-      container.addChild(new Markdown(markdown, 1, 0, getMarkdownTheme()));
-      container.addChild(
-        new Text(theme.fg("dim", "Escape, q, or Enter to close"), 1, 0),
-      );
-      container.addChild(new DynamicBorder((text) => theme.fg("accent", text)));
-      return {
-        render(width: number) {
-          return container.render(width);
-        },
-        invalidate() {
-          container.invalidate();
-        },
-        handleInput(data: string) {
-          if (
-            matchesKey(data, Key.escape) ||
-            matchesKey(data, Key.enter) ||
-            matchesKey(data, Key.ctrl("c")) ||
-            data === "q"
-          ) {
-            done(undefined);
-          }
-        },
-      };
-    },
-    {
-      overlay: true,
-      overlayOptions: {
-        anchor: "center",
-        width: "85%",
-        minWidth: 48,
-        maxHeight: "90%",
-      },
-    },
-  );
-};
-
-const notifyRevertResult = (
-  ctx: ExtensionContext,
-  result: RevertChangesResult,
-): void => {
-  const parts: string[] = [];
-  if (result.reverted.length > 0) {
-    parts.push(`reverted ${result.reverted.length}`);
-  }
-  if (result.conflicts.length > 0) {
-    parts.push(`skipped ${result.conflicts.length} conflict(s)`);
-  }
-  if (result.errors.length > 0) parts.push(`${result.errors.length} error(s)`);
-  ctx.ui.notify(
-    parts.length > 0
-      ? `Pi changes: ${parts.join(", ")}`
-      : "No Pi changes to revert",
-    result.conflicts.length > 0 || result.errors.length > 0
-      ? "warning"
-      : "info",
-  );
-};
-
 // ---------------------------------------------------------------------------
 // Main file browser flow
 // ---------------------------------------------------------------------------
@@ -511,7 +378,6 @@ const notifyRevertResult = (
 const runFileBrowser = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  changeTracker: FileChangeTracker,
 ): Promise<void> => {
   if (ctx.mode !== "tui") {
     ctx.ui.notify("Files requires interactive mode", "error");
@@ -520,70 +386,20 @@ const runFileBrowser = async (
 
   let lastSelectedPath: string | null = null;
   while (true) {
-    await changeTracker.refresh(ctx);
-    const { files } = await buildFileEntries(pi, ctx, changeTracker);
-    const trackedCount = changeTracker.list().length;
-    if (files.length === 0 && trackedCount === 0) {
+    const { files } = await buildFileEntries(pi, ctx);
+    if (files.length === 0) {
       ctx.ui.notify("No files found", "info");
       return;
     }
 
-    const selection = await showFileSelector(
-      ctx,
-      files,
-      trackedCount,
-      lastSelectedPath,
-    );
+    const selection = await showFileSelector(ctx, files, lastSelectedPath);
     if (!selection) return;
-
-    if (selection === ACCEPT_ALL) {
-      if (!ctx.isIdle()) {
-        ctx.ui.notify(
-          "Wait for Pi to finish before accepting changes",
-          "warning",
-        );
-        continue;
-      }
-      const confirmed = await ctx.ui.confirm(
-        "Accept all Pi changes?",
-        "This keeps the current files and clears all rollback snapshots.",
-      );
-      if (!confirmed) continue;
-      const count = changeTracker.acceptAll();
-      ctx.ui.notify(`Accepted Pi changes for ${count} file(s)`, "info");
-      lastSelectedPath = null;
-      continue;
-    }
-
-    if (selection === REVERT_ALL) {
-      if (!ctx.isIdle()) {
-        ctx.ui.notify(
-          "Wait for Pi to finish before reverting changes",
-          "warning",
-        );
-        continue;
-      }
-      const confirmed = await ctx.ui.confirm(
-        "Revert all safe Pi changes?",
-        "Files with external edits will be skipped.",
-      );
-      if (!confirmed) continue;
-      notifyRevertResult(ctx, await changeTracker.revertAll());
-      lastSelectedPath = null;
-      continue;
-    }
 
     const selected = files.find((file) => file.canonicalPath === selection);
     if (!selected) continue;
     lastSelectedPath = selected.canonicalPath;
 
     const actions = ["Add to prompt", "Copy path"];
-    if (selected.piChange) {
-      actions.push("View Pi diff", "Accept Pi changes for this file");
-      if (!selected.piChange.conflict) {
-        actions.push("Revert Pi changes for this file");
-      }
-    }
     const action = await ctx.ui.select(
       `Actions for ${selected.displayPath}`,
       actions,
@@ -594,43 +410,6 @@ const runFileBrowser = async (
       addFileToPrompt(ctx, selected);
     } else if (action === "Copy path") {
       copyPathToClipboard(ctx, selected);
-    } else if (action === "View Pi diff" && selected.piChange) {
-      await showChangeDiff(ctx, selected.piChange);
-    } else if (action === "Accept Pi changes for this file") {
-      if (!ctx.isIdle()) {
-        ctx.ui.notify(
-          "Wait for Pi to finish before accepting changes",
-          "warning",
-        );
-      } else if (changeTracker.acceptFile(selected.canonicalPath)) {
-        ctx.ui.notify(
-          `Accepted Pi changes for ${selected.displayPath}`,
-          "info",
-        );
-      }
-    } else if (
-      action === "Revert Pi changes for this file" &&
-      selected.piChange
-    ) {
-      if (!ctx.isIdle()) {
-        ctx.ui.notify(
-          "Wait for Pi to finish before reverting changes",
-          "warning",
-        );
-        continue;
-      }
-      const confirmed = await ctx.ui.confirm(
-        `Revert Pi changes to ${selected.displayPath}?`,
-        selected.piChange.kind === "new"
-          ? "This deletes the file created by Pi."
-          : "This restores the file content from before Pi first changed it.",
-      );
-      if (confirmed) {
-        notifyRevertResult(
-          ctx,
-          await changeTracker.revertFile(selected.canonicalPath),
-        );
-      }
     }
   }
 };
@@ -640,19 +419,17 @@ const runFileBrowser = async (
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI): void {
-  const changeTracker = registerFileChangeTracking(pi);
-
   pi.registerCommand("files", {
-    description: "Browse files with git status and Pi change review",
+    description: "Browse files with git status",
     handler: async (_args, ctx) => {
-      await runFileBrowser(pi, ctx, changeTracker);
+      await runFileBrowser(pi, ctx);
     },
   });
 
   pi.registerShortcut("ctrl+shift+o", {
     description: "Browse files mentioned or changed in the session",
     handler: async (ctx) => {
-      await runFileBrowser(pi, ctx, changeTracker);
+      await runFileBrowser(pi, ctx);
     },
   });
 }

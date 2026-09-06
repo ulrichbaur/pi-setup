@@ -98,11 +98,9 @@ browser over the current Git tree — tracked and untracked files with their Git
 status — plus files referenced or edited in the session. Dirty files sort
 first, then files changed this session, newest first. Selecting a file offers
 actions to add an `@path` mention to the prompt or copy the path to the
-clipboard. Pi changes also support viewing a diff, accepting changes, and
-reverting changes when no external conflict exists. Renames keep their
-destination path, tracked symlinks keep their own path identity, and failed
-edit/write tool calls do not count as session changes. The browser requires TUI
-mode.
+clipboard. Renames keep their destination path, tracked symlinks keep their
+own path identity, and failed edit/write tool calls do not count as session
+changes. The browser requires TUI mode.
 
 ### Context
 
