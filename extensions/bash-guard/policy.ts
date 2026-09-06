@@ -16,14 +16,6 @@ type ShellToken = string | OperatorToken;
 
 const SHELL_COMMANDS = new Set(["sh", "bash", "zsh", "fish", "dash"]);
 const CONTROL_OPERATORS = new Set(["&&", "||", ";", "&", "|"]);
-const OUTPUT_OPERATORS = new Set([">", ">>", ">&"]);
-const SAFE_REDIRECT_TARGETS = new Set([
-  "/dev/null",
-  "/dev/stdout",
-  "/dev/stderr",
-  "/dev/fd/1",
-  "/dev/fd/2",
-]);
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const FORK_BOMB_PATTERN = /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/;
 
@@ -138,27 +130,18 @@ function analyzeGit(args: string[], risks: BashRisk[]): void {
     return;
   }
 
+  // Operations that are recoverable through the index or reflog are not listed.
   const mutating = new Set([
-    "add",
     "am",
     "apply",
     "bisect",
     "cherry-pick",
-    "checkout",
-    "clone",
-    "commit",
-    "init",
-    "merge",
-    "mv",
     "notes",
-    "pull",
     "push",
     "rebase",
     "reset",
     "restore",
     "revert",
-    "stash",
-    "switch",
   ]);
   if (mutating.has(subcommand)) {
     addRisk(risks, "medium", `git ${subcommand} changes repository state`);
@@ -239,9 +222,6 @@ function analyzeCommand(
   if (command === "find" && args.includes("-delete")) {
     addRisk(risks, "high", "find -delete can remove many files");
   }
-  if (command === "truncate") {
-    addRisk(risks, "medium", "truncate changes a file in place");
-  }
   if (
     command === "dd" &&
     (args.some((argument) => argument.startsWith("of=")) || args.includes("of"))
@@ -278,25 +258,6 @@ function analyzeCommand(
     (args.includes("-R") || args.includes("--recursive"))
   ) {
     addRisk(risks, "medium", `${command} recursively changes file metadata`);
-  }
-  if (
-    (command === "mv" || command === "cp") &&
-    (hasShortFlag(args, "-f") || args.includes("--force"))
-  ) {
-    addRisk(risks, "medium", `${command} --force can overwrite files`);
-  }
-  if (
-    command === "sed" &&
-    (hasShortFlag(args, "-i") || args.includes("--in-place"))
-  ) {
-    addRisk(risks, "medium", "sed -i modifies files in place");
-  }
-  if (
-    command === "perl" &&
-    (args.some((argument) => /^-[A-Za-z]*i[A-Za-z]*$/.test(argument)) ||
-      args.includes("--in-place"))
-  ) {
-    addRisk(risks, "medium", "perl -i modifies files in place");
   }
 
   if (["kill", "pkill", "killall"].includes(command)) {
@@ -344,23 +305,6 @@ function analyzeCommand(
       if (nestedRisk) risks.push(nestedRisk);
     }
   }
-}
-
-function hasUnsafeOutputRedirection(tokens: ShellToken[]): boolean {
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (!isOperator(token) || !OUTPUT_OPERATORS.has(token.op)) continue;
-
-    const target = tokenText(tokens[index + 1]);
-    if (
-      (token.op === ">&" && (target === "1" || target === "2")) ||
-      (target !== null && SAFE_REDIRECT_TARGETS.has(target))
-    ) {
-      continue;
-    }
-    return true;
-  }
-  return false;
 }
 
 function downloadsArePipedToShell(tokens: ShellToken[]): boolean {
@@ -427,10 +371,6 @@ export function analyzeBashCommand(
   }
 
   const risks: BashRisk[] = [];
-  if (hasUnsafeOutputRedirection(parsed)) {
-    addRisk(risks, "medium", "shell output redirection can overwrite files");
-  }
-
   if (downloadsArePipedToShell(parsed)) {
     addRisk(risks, "high", "downloaded content is piped to a shell");
   }

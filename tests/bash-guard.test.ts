@@ -78,23 +78,30 @@ test("bash review keeps actions visible while a long command scrolls", () => {
   assert.ok(secondPage.some((line) => line.includes("Run")));
 });
 
+test("balanced policy ignores what the edit tools already allow", () => {
+  assert.equal(analyzeBashCommand("echo value > output.txt"), null);
+  assert.equal(analyzeBashCommand("sed -i s/old/new/ file"), null);
+  assert.equal(analyzeBashCommand("perl -pi -e s/a/b/ file"), null);
+  assert.equal(analyzeBashCommand("cp -f a b"), null);
+  assert.equal(analyzeBashCommand("truncate -s 0 log"), null);
+  assert.equal(analyzeBashCommand("git add file.txt"), null);
+  assert.equal(analyzeBashCommand("git commit -m test"), null);
+  assert.equal(analyzeBashCommand("git checkout -b topic"), null);
+  assert.equal(analyzeBashCommand("git stash"), null);
+  assert.equal(analyzeBashCommand("git pull"), null);
+  assert.equal(analyzeBashCommand("git merge topic"), null);
+});
+
 test("balanced policy flags state-changing commands", () => {
-  assert.deepEqual(analyzeBashCommand("git commit -m test"), {
+  assert.deepEqual(analyzeBashCommand("git rebase -i HEAD~3"), {
     severity: "medium",
-    reasons: ["git commit changes repository state"],
+    reasons: ["git rebase changes repository state"],
   });
-  assert.equal(
-    analyzeBashCommand("echo value > output.txt")?.severity,
-    "medium",
-  );
-  assert.equal(
-    analyzeBashCommand("sed -i s/old/new/ file")?.severity,
-    "medium",
-  );
+  assert.equal(analyzeBashCommand("git push origin main")?.severity, "medium");
   assert.equal(analyzeBashCommand("rm -rf build")?.severity, "high");
   assert.equal(analyzeBashCommand("git reset --hard HEAD~1")?.severity, "high");
   assert.equal(
-    analyzeBashCommand("git -C ../project commit -m test")?.severity,
+    analyzeBashCommand("git -C ../project rebase main")?.severity,
     "medium",
   );
   assert.equal(
@@ -207,19 +214,19 @@ test("bash-guard uses RPC confirmation and remembers an abort", async () => {
   } as unknown as ExtensionContext;
 
   assert.match(
-    (await handler(bashCall("git commit -m test"), context))?.reason ?? "",
+    (await handler(bashCall("git rebase main"), context))?.reason ?? "",
     /Blocked by the user/,
   );
   assert.match(
-    (await handler(bashCall("git commit -m test"), context))?.reason ?? "",
+    (await handler(bashCall("git rebase main"), context))?.reason ?? "",
     /do not change the release commit/,
   );
   assert.match(
-    (await handler(bashCall("git commit -m test"), context))?.reason ?? "",
+    (await handler(bashCall("git rebase main"), context))?.reason ?? "",
     /aborted recently/,
   );
   assert.match(
-    (await handler(bashCall("git commit -m test"), context))?.reason ?? "",
+    (await handler(bashCall("git rebase main"), context))?.reason ?? "",
     /do not change the release commit/,
   );
   assert.equal(confirmations, 1);
@@ -248,5 +255,5 @@ test("bash-guard allows an interactively confirmed command", async () => {
     mode: "rpc",
     ui: { confirm: async () => true },
   } as unknown as ExtensionContext;
-  assert.equal(await handler(bashCall("git add file.txt"), context), undefined);
+  assert.equal(await handler(bashCall("rm file.txt"), context), undefined);
 });

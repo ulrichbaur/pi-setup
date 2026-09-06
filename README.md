@@ -122,6 +122,11 @@ assistant replies append to the linked file.
 ### Bash guard
 
 `extensions/bash-guard/` reviews flagged Bash commands before execution.
+It flags destructive or hard-to-recover operations such as `rm`, `sudo`,
+`git reset --hard`, `git rebase`, and `git push`. It does not flag actions
+the edit tools already allow, such as file redirects or `sed -i`, nor Git
+operations that the index or reflog can undo, such as `git add`, `git
+commit`, `git checkout`, `git merge`, and `git pull`.
 Interactive sessions can approve or block commands and optionally provide a
 reason when they abort one. Non-interactive sessions fail closed unless
 `bash-guard-auto-allow` is enabled. The subagents extension reuses the
