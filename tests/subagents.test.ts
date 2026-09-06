@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  assertSupportedTools,
   parseSubagentConfig,
   selectSubagentModel,
   subagentToolSelectionArgs,
@@ -35,6 +36,17 @@ test("accepts inherited and preferred subagent models", () => {
         },
       },
     },
+  );
+});
+
+test("rejects the raw bash tool in agent definitions", () => {
+  assert.deepEqual(assertSupportedTools("worker.md", ["read", "safe_bash"]), [
+    "read",
+    "safe_bash",
+  ]);
+  assert.throws(
+    () => assertSupportedTools("worker.md", ["read", "bash"]),
+    /worker\.md: unsupported subagent tool bash/,
   );
 });
 

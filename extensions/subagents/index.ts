@@ -19,15 +19,8 @@ import { Type } from "typebox";
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const AGENTS_DIR = join(EXTENSION_DIR, "agents");
 const CONFIG_PATH = join(EXTENSION_DIR, "config.json");
-const BUILTIN_TOOLS = new Set([
-  "read",
-  "write",
-  "edit",
-  "bash",
-  "grep",
-  "find",
-  "ls",
-]);
+// Subagents never get the raw bash tool; safe_bash is the only shell.
+const BUILTIN_TOOLS = new Set(["read", "write", "edit", "grep", "find", "ls"]);
 const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
   safe_bash: join(EXTENSION_DIR, "tools", "safe-bash.ts"),
   web_fetch: join(EXTENSION_DIR, "..", "web-fetch", "index.ts"),
@@ -178,6 +171,18 @@ function parseTools(value: unknown): string[] {
     .filter(Boolean);
 }
 
+export function assertSupportedTools(
+  fileName: string,
+  tools: string[],
+): string[] {
+  for (const tool of tools) {
+    if (!BUILTIN_TOOLS.has(tool) && !CUSTOM_TOOL_EXTENSIONS[tool]) {
+      throw new Error(`${fileName}: unsupported subagent tool ${tool}`);
+    }
+  }
+  return tools;
+}
+
 function loadAgents(config: SubagentConfig): AgentDefinition[] {
   const names = existsSync(AGENTS_DIR) ? readdirSync(AGENTS_DIR) : [];
   const agents = names
@@ -198,12 +203,7 @@ function loadAgents(config: SubagentConfig): AgentDefinition[] {
           `${CONFIG_PATH}: missing agents.${frontmatter.name} for ${name}`,
         );
       }
-      const tools = parseTools(frontmatter.tools);
-      for (const tool of tools) {
-        if (!BUILTIN_TOOLS.has(tool) && !CUSTOM_TOOL_EXTENSIONS[tool]) {
-          throw new Error(`${name}: unsupported subagent tool ${tool}`);
-        }
-      }
+      const tools = assertSupportedTools(name, parseTools(frontmatter.tools));
       return {
         name: frontmatter.name,
         description: frontmatter.description,

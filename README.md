@@ -124,8 +124,8 @@ assistant replies append to the linked file.
 `extensions/bash-guard/` reviews flagged Bash commands before execution.
 Interactive sessions can approve or block commands and optionally provide a
 reason when they abort one. Non-interactive sessions fail closed unless
-`bash-guard-auto-allow` is enabled. The shared policy also
-blocks catastrophic and parent-session Git operations in subagents.
+`bash-guard-auto-allow` is enabled. The subagents extension reuses the
+headless part of this policy in its `safe_bash` tool.
 
 ### Save Markdown
 
@@ -149,6 +149,7 @@ Responses and model-visible output have explicit size limits.
 It provides scout, researcher, and worker agents in isolated Pi processes.
 The researcher receives only the web tools.
 The worker receives file tools and `safe_bash`, which blocks common destructive system commands.
+Agent definitions cannot request the raw `bash` tool.
 
 `extensions/subagents/config.json` is required.
 Each agent may set a `models` array of `provider/model` IDs there.

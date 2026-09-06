@@ -3,11 +3,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import {
-  analyzeBashCommand,
-  type BashRisk,
-  headlessBlockReason,
-} from "./policy.ts";
+import { analyzeBashCommand, type BashRisk } from "./policy.ts";
 import { BashReviewComponent } from "./review.ts";
 
 const ABORT_REMEMBER_MS = 60_000;
@@ -68,25 +64,7 @@ async function promptForCommand(
   return { run: false, rejectReason: await promptForRejectReason(ctx) };
 }
 
-function subagentDepth(): number {
-  const depth = Number(process.env.PI_SUBAGENT_DEPTH ?? "0");
-  return Number.isFinite(depth) && depth >= 1 ? depth : 0;
-}
-
 export default function bashGuard(pi: ExtensionAPI): void {
-  if (subagentDepth() >= 1) {
-    pi.on("tool_call", async (event) => {
-      if (!isToolCallEventType("bash", event)) return;
-      const reason = headlessBlockReason(event.input.command);
-      if (!reason) return;
-      return {
-        block: true,
-        reason: `Blocked by bash-guard in a non-interactive subagent: ${reason}. Ask the parent agent to perform or confirm this operation.`,
-      };
-    });
-    return;
-  }
-
   pi.registerFlag("bash-guard-auto-allow", {
     description:
       "Allow flagged bash commands when interactive confirmation is unavailable",
