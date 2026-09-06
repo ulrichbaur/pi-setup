@@ -10,7 +10,10 @@ import {
   loadOpenCodeGoAuthCookie,
   saveOpenCodeGoAuthCookie,
 } from "../extensions/pi-statusline/auth.ts";
-import { normalizeCodexUsage } from "../extensions/pi-statusline/quota/codex.ts";
+import {
+  createCodexQuotaAdapter,
+  normalizeCodexUsage,
+} from "../extensions/pi-statusline/quota/codex.ts";
 import {
   createOpenCodeGoQuotaAdapter,
   parseOpenCodeGoHtml,
@@ -117,6 +120,36 @@ test("Codex normalization maps windows, clamps usage, and accepts reset formats"
     }),
     undefined,
   );
+});
+
+test("Codex adapter reports definitive failures instead of throwing", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => (globalThis.fetch = originalFetch));
+
+  const expired = createCodexQuotaAdapter({
+    readAuth: async () => ({
+      accessToken: "token",
+      accountId: "acct",
+      expiresAt: Date.now() - 1_000,
+    }),
+  });
+  assert.equal(
+    (await expired.getQuota({}))?.error,
+    "codex: token expired, re-run pi login",
+  );
+
+  const adapter = createCodexQuotaAdapter({
+    readAuth: async () => ({ accessToken: "token", accountId: "acct" }),
+  });
+  globalThis.fetch = async () =>
+    ({ ok: true, json: async () => ({ unexpected: true }) }) as Response;
+  assert.equal(
+    (await adapter.getQuota({}))?.error,
+    "codex: no usage parsed, response shape may have changed",
+  );
+
+  globalThis.fetch = async () => ({ ok: false, status: 404 }) as Response;
+  await assert.rejects(adapter.getQuota({}), /request failed \(404\)/);
 });
 
 test("Codex labels model-specific windows by their actual duration", () => {

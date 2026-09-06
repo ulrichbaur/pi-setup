@@ -144,6 +144,36 @@ test("quota cache serves stale data after repeated failures and recovers", async
   assert.equal(calls, 5);
 });
 
+test("quota cache reports a source that never answered", async () => {
+  let now = 1;
+  const throwing = withQuotaCache(
+    {
+      provider: "codex",
+      async getQuota() {
+        throw new Error("usage request failed (404)");
+      },
+    },
+    { now: () => now, ttlOkMs: 1, ttlRetryMs: 1, staleFailureLimit: 3 },
+  );
+  assert.equal(await throwing.getQuota({}), undefined);
+  now += 2;
+  assert.equal(await throwing.getQuota({}), undefined);
+  now += 2;
+  assert.equal(
+    (await throwing.getQuota({}))?.error,
+    "codex: usage request failed (404)",
+  );
+
+  const silent = withQuotaCache(
+    { provider: "opencode-go", getQuota: async () => undefined },
+    { now: () => now, ttlOkMs: 1, ttlRetryMs: 1, staleFailureLimit: 1 },
+  );
+  assert.equal(
+    (await silent.getQuota({}))?.error,
+    "opencode-go: no usage returned",
+  );
+});
+
 test("statusline installs one footer, rerenders, and restores it on shutdown", async () => {
   const footerCalls: unknown[] = [];
   let renders = 0;

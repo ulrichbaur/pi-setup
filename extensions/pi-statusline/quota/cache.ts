@@ -23,7 +23,9 @@ type QuotaCacheOptions = {
  * Wraps an adapter with an in-memory TTL cache and in-flight dedup, so
  * per-message status updates don't hit provider endpoints on every turn.
  * After STALE_FAILURE_LIMIT consecutive refresh failures the cached
- * status is served with `stale: true`.
+ * status is served with `stale: true`. Without a cached status the same
+ * limit yields an error status instead, so a source that never answered
+ * is reported in the footer rather than silently absent.
  */
 export function withQuotaCache(
   adapter: QuotaAdapter,
@@ -39,11 +41,19 @@ export function withQuotaCache(
   let inflight: Promise<QuotaStatus | undefined> | undefined;
 
   // Once repeated failures make the value unreliable, expose that state without hiding it.
-  function onFailure(): QuotaStatus | undefined {
+  function onFailure(message: string): QuotaStatus | undefined {
     failures++;
-    if (cached && failures >= staleFailureLimit)
+    if (failures < staleFailureLimit) return cached;
+    if (cached) {
       cached = { ...cached, stale: true };
-    return cached;
+      return cached;
+    }
+    return {
+      provider: adapter.provider,
+      windows: [],
+      fetchedAt: new Date(now()),
+      error: `${adapter.provider}: ${message}`,
+    };
   }
 
   return {
@@ -58,16 +68,14 @@ export function withQuotaCache(
       inflight = adapter
         .getQuota(ctx)
         .then((status) => {
-          if (!status) return onFailure();
+          if (!status) return onFailure("no usage returned");
           failures = 0;
           cached = status;
           return cached;
         })
-        .catch((error: unknown) => {
-          const fallback = onFailure();
-          if (fallback) return fallback;
-          throw error;
-        })
+        .catch((error: unknown) =>
+          onFailure(error instanceof Error ? error.message : String(error)),
+        )
         .finally(() => {
           inflight = undefined;
         });

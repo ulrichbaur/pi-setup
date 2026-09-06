@@ -20,7 +20,7 @@ const AUTH_FILE = join(
   "auth.json",
 );
 
-type CodexCredentials = {
+export type CodexCredentials = {
   accessToken: string;
   accountId: string;
   /** Epoch ms; only known when read from auth.json. */
@@ -46,17 +46,36 @@ type CodexUsageResponse = {
   rate_limit?: RateLimitBucket | null;
 };
 
-export function createCodexQuotaAdapter(): QuotaAdapter {
+export type CodexAdapterOptions = {
+  /** Reads Pi's stored Codex login; tests inject this to avoid the real auth file. */
+  readAuth?: () => Promise<CodexCredentials | undefined>;
+};
+
+// Definitive states return an error status the footer can show. Only
+// transient failures throw; the cache turns repeated ones into an error.
+function errorStatus(message: string): QuotaStatus {
+  return {
+    provider: "codex",
+    windows: [],
+    fetchedAt: new Date(),
+    error: message,
+  };
+}
+
+export function createCodexQuotaAdapter(
+  options: CodexAdapterOptions = {},
+): QuotaAdapter {
+  const readAuth = options.readAuth ?? readCodexAuth;
   return {
     provider: "codex",
     async getQuota(ctx) {
-      const credentials = await getCodexCredentials(ctx);
+      const credentials = await getCodexCredentials(ctx, readAuth);
       if (!credentials) return undefined;
       if (
         credentials.expiresAt !== undefined &&
         credentials.expiresAt < Date.now()
       ) {
-        throw new Error("Codex token expired — re-run pi login");
+        return errorStatus("codex: token expired, re-run pi login");
       }
 
       const headers = {
@@ -72,8 +91,12 @@ export function createCodexQuotaAdapter(): QuotaAdapter {
           lastStatus = response.status;
           continue;
         }
-        return normalizeCodexUsage(
+        const status = normalizeCodexUsage(
           (await response.json()) as CodexUsageResponse,
+        );
+        return (
+          status ??
+          errorStatus("codex: no usage parsed, response shape may have changed")
         );
       }
       throw new Error(`Codex usage request failed (${lastStatus})`);
@@ -83,14 +106,13 @@ export function createCodexQuotaAdapter(): QuotaAdapter {
 
 async function getCodexCredentials(
   ctx: QuotaAdapterContext,
+  readAuth: () => Promise<CodexCredentials | undefined>,
 ): Promise<CodexCredentials | undefined> {
   // Prefer the registry's current token; auth.json is a fallback for existing Pi logins.
   const registryToken = await ctx.modelRegistry
     ?.getApiKeyForProvider("openai-codex")
     .catch(() => undefined);
-  return (
-    parseCodexRegistryCredentials(registryToken) ?? (await readCodexAuth())
-  );
+  return parseCodexRegistryCredentials(registryToken) ?? (await readAuth());
 }
 
 function parseCodexRegistryCredentials(
