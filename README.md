@@ -144,8 +144,11 @@ Set `GOOGLE_SEARCH_API_KEY` and `GOOGLE_CSE_ID` in the environment.
 The tool supports exact phrases, exclusions, site restrictions, and up to ten results.
 
 `extensions/web-fetch/` adds `web_fetch` for HTML, text, and PDF content.
-It uses Readability for HTML and falls back to Jina Reader for dynamic pages.
-Responses and model-visible output have explicit size limits.
+It uses Readability for HTML and reads Next.js server-component payloads
+when a page ships its text that way. It contacts only the requested URL;
+there is no third-party reader fallback, so JavaScript-rendered pages fail
+with an explicit error. Responses and model-visible output have explicit
+size limits.
 
 ### Subagents
 
