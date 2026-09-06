@@ -14,6 +14,17 @@ Development requires Node.js 22.6 or newer and pnpm 11.9.0.
 
 ## Extensions
 
+### Clean startup header
+
+`extensions/clean-header.ts` replaces Pi's built-in startup header with its
+compact first two lines. It respects the active keybindings and runs only in
+TUI mode.
+
+Set `quietStartup` to `true` in
+`$PI_CODING_AGENT_DIR/settings.json` if you also want to hide the
+loaded-resource sections below the header. When the variable is unset, use
+`~/.pi/agent/settings.json`.
+
 ### Skillset
 
 `extensions/skillset/` combines three independently registered skill tools:
