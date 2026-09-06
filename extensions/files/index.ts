@@ -36,7 +36,7 @@ import {
   type RevertChangesResult,
   registerFileChangeTracking,
   type TrackedFileChange,
-} from "./changes.js";
+} from "./changes.ts";
 import {
   collectSessionFileChanges,
   extractFileReferencesFromEntry,
@@ -44,7 +44,7 @@ import {
   normalizeReferencePath,
   parseGitStatusOutput,
   toCanonicalPath,
-} from "./utils.js";
+} from "./utils.ts";
 
 // ---------------------------------------------------------------------------
 // Types
