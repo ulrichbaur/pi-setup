@@ -7,8 +7,6 @@ Development requires Node.js 22.6 or newer and pnpm 11.9.0.
 ## Structure
 
 - `extensions/` — TypeScript extensions
-- `skills/` — skills, each normally containing a `SKILL.md`
-- `prompts/` — Markdown prompt templates
 - `themes/` — JSON themes
 - `tests/` — tests for extensions and supporting code
 
