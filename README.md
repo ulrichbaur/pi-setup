@@ -1,8 +1,9 @@
 # Pi setup
 
-Personal [Pi](https://pi.dev) extensions, skills, prompt templates, and themes.
+Personal [Pi](https://pi.dev) extensions and themes.
 
-Development requires Node.js 22.6 or newer and pnpm 11.9.0.
+Development requires Node.js 22.6 or newer and the pnpm version pinned in
+`package.json`.
 
 ## Structure
 
@@ -30,7 +31,8 @@ loaded-resource sections below the header. When the variable is unset, use
 
 - `/skill` opens a searchable picker and queues a skill for the next message.
   It reads Pi's effective loaded skill collection, so package `skills` filters
-  in `settings.json` are respected. Results currently sort alphabetically.
+  in `settings.json` are respected. Recently and frequently used skills sort
+  first; unused skills follow alphabetically.
 - `/skill-policy` controls which loaded skills the model may see and invoke
   automatically. Skills remain available through manual `/skill:name` commands.
   The policy is fail-closed: no skills are exposed by default, and a malformed

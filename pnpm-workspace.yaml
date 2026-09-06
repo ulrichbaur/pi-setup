@@ -1,3 +1,4 @@
+# Both arrive transitively through pi-ai. Their build scripts are not needed.
 allowBuilds:
   '@google/genai': false
   protobufjs: false
