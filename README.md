@@ -158,12 +158,25 @@ The extension depends on the web-fetch and web-search extensions and on the
 shared bash policy in `lib/`. Removing one of them makes the agents that use
 it fail when the extension loads.
 
-`extensions/subagents/config.json` is optional and overrides the built-in
-defaults: concurrency 4, at most 8 parallel tasks, and no model preferences.
-Each agent may set a `models` array of `provider/model` IDs there.
+The optional config lives in `~/.pi/agent/subagents.json` (or below
+`PI_CODING_AGENT_DIR` when set) and overrides the built-in defaults:
+concurrency 4, at most 8 parallel tasks, and no model preferences.
+Each agent may set a `models` array of `provider/model` IDs.
 The first available preferred model is selected. An agent without an available
 preferred model inherits the parent model and thinking level.
 A config entry for an agent without a matching agent file is an error.
+
+```json
+{
+  "maxConcurrency": 4,
+  "maxParallelTasks": 8,
+  "agents": {
+    "worker": {
+      "models": ["provider/model-id", "other-provider/fallback-model"]
+    }
+  }
+}
+```
 
 ## Develop locally
 

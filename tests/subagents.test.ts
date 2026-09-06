@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
+import { join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import {
   assertSupportedTools,
+  CONFIG_PATH,
   DEFAULT_CONFIG,
   parseSubagentConfig,
   selectSubagentModel,
@@ -59,6 +62,16 @@ test("a custom tool whose sibling extension is missing fails at load", () => {
   assert.deepEqual(
     assertSupportedTools("scout.md", ["read", "grep"], () => false),
     ["read", "grep"],
+  );
+});
+
+test("the subagent config lives in the agent directory, not the package", () => {
+  const agentDir =
+    process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+  assert.equal(CONFIG_PATH, join(agentDir, "subagents.json"));
+  assert.equal(
+    relative(resolve("extensions"), CONFIG_PATH).startsWith(".."),
+    true,
   );
 });
 

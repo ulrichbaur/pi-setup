@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -19,7 +19,10 @@ import { Type } from "typebox";
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = join(EXTENSION_DIR, "..", "..");
 const AGENTS_DIR = join(EXTENSION_DIR, "agents");
-const CONFIG_PATH = join(EXTENSION_DIR, "config.json");
+// Config is machine-local state, so it lives with Pi's other agent files.
+const AGENT_DIR =
+  process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+export const CONFIG_PATH = join(AGENT_DIR, "subagents.json");
 // Subagents never get the raw bash tool; safe_bash is the only shell.
 const BUILTIN_TOOLS = new Set(["read", "write", "edit", "grep", "find", "ls"]);
 const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
