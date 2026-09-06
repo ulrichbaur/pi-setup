@@ -6,12 +6,12 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import bashGuard from "../extensions/bash-guard/index.ts";
+import { BashReviewComponent } from "../extensions/bash-guard/review.ts";
 import {
   analyzeBashCommand,
   headlessBlockReason,
   POLICY_RULES,
-} from "../extensions/bash-guard/policy.ts";
-import { BashReviewComponent } from "../extensions/bash-guard/review.ts";
+} from "../lib/bash-policy.ts";
 
 test("balanced policy allows read-only Git and ordinary pipelines", () => {
   assert.equal(analyzeBashCommand("git status --short"), null);

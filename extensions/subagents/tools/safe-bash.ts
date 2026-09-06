@@ -2,7 +2,7 @@ import {
   createBashToolDefinition,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { headlessBlockReason } from "../../bash-guard/policy.ts";
+import { headlessBlockReason } from "../../../lib/bash-policy.ts";
 
 export function dangerousCommandReason(command: string): string | null {
   const reason = headlessBlockReason(command);

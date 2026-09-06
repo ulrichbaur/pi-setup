@@ -9,7 +9,7 @@ import {
   Text,
   truncateToWidth,
 } from "@earendil-works/pi-tui";
-import type { BashRisk } from "./policy.ts";
+import type { BashRisk } from "../../lib/bash-policy.ts";
 
 type BashReviewChoice = "abort" | "run";
 

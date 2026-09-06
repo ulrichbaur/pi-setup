@@ -3,7 +3,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { analyzeBashCommand, type BashRisk } from "./policy.ts";
+import { analyzeBashCommand, type BashRisk } from "../../lib/bash-policy.ts";
 import { BashReviewComponent } from "./review.ts";
 
 const ABORT_REMEMBER_MS = 60_000;

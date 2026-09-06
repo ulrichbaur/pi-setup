@@ -51,6 +51,17 @@ test("rejects the raw bash tool in agent definitions", () => {
   );
 });
 
+test("a custom tool whose sibling extension is missing fails at load", () => {
+  assert.throws(
+    () => assertSupportedTools("researcher.md", ["web_search"], () => false),
+    /researcher\.md: tool web_search needs extensions\/web-search\/index\.ts, which is missing/,
+  );
+  assert.deepEqual(
+    assertSupportedTools("scout.md", ["read", "grep"], () => false),
+    ["read", "grep"],
+  );
+});
+
 test("fills omitted subagent config fields with defaults", () => {
   assert.deepEqual(parseSubagentConfig({}), DEFAULT_CONFIG);
   assert.deepEqual(

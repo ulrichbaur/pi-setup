@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_MAX_BYTES,
@@ -17,6 +17,7 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_DIR = join(EXTENSION_DIR, "..", "..");
 const AGENTS_DIR = join(EXTENSION_DIR, "agents");
 const CONFIG_PATH = join(EXTENSION_DIR, "config.json");
 // Subagents never get the raw bash tool; safe_bash is the only shell.
@@ -190,13 +191,26 @@ function parseTools(value: unknown): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Rejects unknown tools and custom tools whose sibling extension is missing,
+ * so a broken dependency fails when the extension loads rather than inside a
+ * child process.
+ */
 export function assertSupportedTools(
   fileName: string,
   tools: string[],
+  exists: (path: string) => boolean = existsSync,
 ): string[] {
   for (const tool of tools) {
-    if (!BUILTIN_TOOLS.has(tool) && !CUSTOM_TOOL_EXTENSIONS[tool]) {
+    const extensionPath = CUSTOM_TOOL_EXTENSIONS[tool];
+    if (!BUILTIN_TOOLS.has(tool) && !extensionPath) {
       throw new Error(`${fileName}: unsupported subagent tool ${tool}`);
+    }
+    if (extensionPath && !exists(extensionPath)) {
+      const shown = relative(PACKAGE_DIR, extensionPath);
+      throw new Error(
+        `${fileName}: tool ${tool} needs ${shown}, which is missing`,
+      );
     }
   }
   return tools;

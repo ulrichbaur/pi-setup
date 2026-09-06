@@ -7,6 +7,7 @@ Development requires Node.js 22.6 or newer and pnpm 11.9.0.
 ## Structure
 
 - `extensions/` — TypeScript extensions
+- `lib/` — code shared by more than one extension
 - `themes/` — JSON themes
 - `tests/` — tests for extensions and supporting code
 
@@ -153,6 +154,9 @@ It provides scout, researcher, and worker agents in isolated Pi processes.
 The researcher receives only the web tools.
 The worker receives file tools and `safe_bash`, which blocks common destructive system commands.
 Agent definitions cannot request the raw `bash` tool.
+The extension depends on the web-fetch and web-search extensions and on the
+shared bash policy in `lib/`. Removing one of them makes the agents that use
+it fail when the extension loads.
 
 `extensions/subagents/config.json` is optional and overrides the built-in
 defaults: concurrency 4, at most 8 parallel tasks, and no model preferences.

@@ -2,7 +2,9 @@
 
 - Interactive policy: which commands the user confirms before they run.
 - Headless policy: which commands a subagent may never run.
-- Both policies are columns of one rule table in `policy.ts`.
+- Both policies are columns of one rule table in `lib/bash-policy.ts`.
+  The table lives outside the extension because the subagents extension
+  consumes its headless column; this note still owns the semantics.
   Each row matches one command shape, carries an interactive severity
   (or none), and says whether a headless worker may run it.
   Add a command once and decide both answers in the same place.
