@@ -12,6 +12,7 @@ This repository is an installable Pi package containing personal Pi resources.
 - put Pi theme JSON files in `themes/`.
 - keep runtime dependencies in `dependencies` and Pi-provided imports in `peerDependencies`.
 - store extension-managed Pi state below `PI_CODING_AGENT_DIR` when set; otherwise use `~/.pi/agent`.
+  Resolve that directory with Pi's `getAgentDir()`; never compute it by hand.
 
 Do not commit credentials, generated state, sessions, `node_modules`, or machine-specific absolute paths.
 

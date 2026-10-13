@@ -32,6 +32,7 @@ import {
 import { withQuotaCache } from "./quota/cache.ts";
 import { createCodexQuotaAdapter } from "./quota/codex.ts";
 import { createOpenCodeGoQuotaAdapter } from "./quota/opencode-go.ts";
+import { errorStatus } from "./quota/status.ts";
 import type { QuotaAdapter, QuotaProvider } from "./quota/types.ts";
 import { createStatuslineRuntime } from "./statusline.ts";
 
@@ -126,15 +127,7 @@ export function createQuotaAdapters(
 
 // Shows a load failure where the quota would appear.
 function failedAdapter(provider: QuotaProvider, error: string): QuotaAdapter {
-  return {
-    provider,
-    getQuota: async () => ({
-      provider,
-      windows: [],
-      fetchedAt: new Date(),
-      error,
-    }),
-  };
+  return { provider, getQuota: async () => errorStatus(provider, error) };
 }
 
 async function settle<T>(promise: Promise<T>): Promise<Loaded<T>> {

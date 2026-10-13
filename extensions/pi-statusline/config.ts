@@ -1,8 +1,9 @@
 /** Loads and updates the statusline's optional local configuration and supplies its defaults. */
 
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { isRecord } from "../../lib/is-record.ts";
 
 export type StatuslineConfig = {
   opencodeGo?: {
@@ -22,8 +23,7 @@ export const DEFAULT_CONFIG: StatuslineConfig = {
 };
 
 // Keep extension state alongside Pi's configured agent directory when one is supplied.
-const AGENT_DIR =
-  process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+const AGENT_DIR = getAgentDir();
 export const CONFIG_PATH = join(AGENT_DIR, "pi-statusline.json");
 export const AUTH_PATH = join(AGENT_DIR, "pi-statusline.auth.json");
 
@@ -93,8 +93,4 @@ export async function saveConfig(
   } finally {
     await rm(temporary, { force: true });
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

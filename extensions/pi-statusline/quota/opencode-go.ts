@@ -1,5 +1,7 @@
 /** Fetches OpenCode Go usage from the console JSON API and normalizes meter windows. */
 
+import { isRecord } from "../../../lib/is-record.ts";
+import { errorStatus } from "./status.ts";
 import type {
   QuotaAdapter,
   QuotaAdapterContext,
@@ -88,7 +90,10 @@ export function createOpenCodeGoQuotaAdapter(
         const missing = [];
         if (!workspaceId) missing.push("workspaceId");
         if (!authToken) missing.push("pi-statusline.auth.json authToken");
-        return errorStatus(`opencode-go: set ${missing.join(" + ")}`);
+        return errorStatus(
+          "opencode-go",
+          `opencode-go: set ${missing.join(" + ")}`,
+        );
       }
 
       try {
@@ -104,12 +109,16 @@ export function createOpenCodeGoQuotaAdapter(
         });
 
         if (response.status === 401) {
-          return errorStatus("opencode-go: auth token rejected or expired");
+          return errorStatus(
+            "opencode-go",
+            "opencode-go: auth token rejected or expired",
+          );
         }
         if (!response.ok) {
           const tag = await errorTag(response);
           if (response.status === 400 && tag === "OrgRequired") {
             return errorStatus(
+              "opencode-go",
               "opencode-go: workspace ID rejected (OrgRequired)",
             );
           }
@@ -129,6 +138,7 @@ export function createOpenCodeGoQuotaAdapter(
         const windows = parseOpenCodeGoStatus(await response.json());
         if (!windows.length) {
           return errorStatus(
+            "opencode-go",
             "opencode-go: no usage meters (no active plan, or the API changed)",
           );
         }
@@ -144,10 +154,6 @@ export function createOpenCodeGoQuotaAdapter(
   };
 }
 
-function errorStatus(error: string): QuotaStatus {
-  return { provider: "opencode-go", windows: [], fetchedAt: new Date(), error };
-}
-
 // Error bodies look like `{"_tag":"OrgRequired"}`. Show only the tag, never raw body text.
 async function errorTag(response: Response): Promise<string | undefined> {
   try {
@@ -157,8 +163,4 @@ async function errorTag(response: Response): Promise<string | undefined> {
   } catch {
     return undefined;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

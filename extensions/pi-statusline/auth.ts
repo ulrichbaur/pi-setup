@@ -2,6 +2,7 @@
 
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { isRecord } from "../../lib/is-record.ts";
 import { AUTH_PATH } from "./config.ts";
 
 // Keep secrets out of the regular config and its diagnostic command output.
@@ -47,8 +48,4 @@ async function loadAuth(path: string): Promise<Record<string, unknown>> {
   }
   if (isRecord(auth)) return auth;
   throw new Error(`${path}: expected a JSON object`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -4,9 +4,11 @@
  */
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  getAgentDir,
+} from "@earendil-works/pi-coding-agent";
 import { getLoadedSkills } from "../core.ts";
 import { type SkillMenuItem, showSkillPolicyMenu } from "./policy-menu.ts";
 
@@ -15,8 +17,7 @@ export type SkillPolicyConfig = {
   allowAutoInvocation?: string[];
 };
 
-const AGENT_DIR =
-  process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+const AGENT_DIR = getAgentDir();
 const CONFIG_PATH = join(AGENT_DIR, "skill-policy.json");
 
 /** Validates untrusted persisted data and creates an invocation policy. */

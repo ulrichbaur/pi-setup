@@ -1,8 +1,10 @@
 /** Fetches Codex usage with Pi credentials and normalizes its rate-limit response. */
 
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { isRecord } from "../../../lib/is-record.ts";
+import { errorStatus } from "./status.ts";
 import type {
   QuotaAdapter,
   QuotaAdapterContext,
@@ -15,10 +17,7 @@ export const CODEX_USAGE_URLS = [
   "https://chatgpt.com/backend-api/wham/usage",
   "https://chatgpt.com/backend-api/codex/usage",
 ] as const;
-const AUTH_FILE = join(
-  process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent"),
-  "auth.json",
-);
+const AUTH_FILE = join(getAgentDir(), "auth.json");
 
 export type CodexCredentials = {
   accessToken: string;
@@ -51,15 +50,6 @@ export type CodexAdapterOptions = {
   readAuth?: () => Promise<CodexCredentials | undefined>;
 };
 
-function errorStatus(message: string): QuotaStatus {
-  return {
-    provider: "codex",
-    windows: [],
-    fetchedAt: new Date(),
-    error: message,
-  };
-}
-
 export function createCodexQuotaAdapter(
   options: CodexAdapterOptions = {},
 ): QuotaAdapter {
@@ -73,7 +63,7 @@ export function createCodexQuotaAdapter(
         credentials.expiresAt !== undefined &&
         credentials.expiresAt < Date.now()
       ) {
-        return errorStatus("codex: token expired, re-run pi login");
+        return errorStatus("codex", "codex: token expired, re-run pi login");
       }
 
       const headers = {
@@ -96,12 +86,15 @@ export function createCodexQuotaAdapter(
         );
         return (
           status ??
-          errorStatus("codex: no usage parsed, response shape may have changed")
+          errorStatus(
+            "codex",
+            "codex: no usage parsed, response shape may have changed",
+          )
         );
       }
       // A retired URL answers 404, so one 401 from either URL means the login was rejected.
       if (rejected)
-        return errorStatus("codex: login rejected, re-run pi login");
+        return errorStatus("codex", "codex: login rejected, re-run pi login");
       throw new Error(`Codex usage request failed (${lastStatus})`);
     },
   };
@@ -254,8 +247,4 @@ function decodeBase64Url(value: string): string {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
   return Buffer.from(padded, "base64").toString("utf8");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
