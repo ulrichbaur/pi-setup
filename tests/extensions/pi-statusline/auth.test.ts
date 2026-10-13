@@ -38,3 +38,16 @@ test("saves the OpenCode Go token without replacing other auth fields", () =>
       opencodeGo: { future: "keep", authToken: "token-value" },
     });
   }));
+
+test("names the auth file when it is malformed", () =>
+  withTempDir("pi-statusline-auth-", async (directory) => {
+    const authFile = join(directory, "pi-statusline.auth.json");
+    await writeFile(authFile, "{ not json");
+    await assert.rejects(loadOpenCodeGoAuthToken(authFile), (error: Error) =>
+      error.message.startsWith(`${authFile}: `),
+    );
+    await writeFile(authFile, "[]");
+    await assert.rejects(loadOpenCodeGoAuthToken(authFile), {
+      message: `${authFile}: expected a JSON object`,
+    });
+  }));

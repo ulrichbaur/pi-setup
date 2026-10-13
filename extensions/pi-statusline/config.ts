@@ -27,23 +27,46 @@ const AGENT_DIR =
 export const CONFIG_PATH = join(AGENT_DIR, "pi-statusline.json");
 export const AUTH_PATH = join(AGENT_DIR, "pi-statusline.auth.json");
 
-// Preserve defaults when a config only overrides selected nested quota settings.
 export async function loadConfig(
   path = CONFIG_PATH,
 ): Promise<StatuslineConfig> {
+  let raw: unknown;
   try {
-    const raw = JSON.parse(await readFile(path, "utf8"));
-    return {
-      ...DEFAULT_CONFIG,
-      ...raw,
-      quotas: { ...DEFAULT_CONFIG.quotas, ...raw.quotas },
-    };
+    raw = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
     // A missing config is an intentional, zero-setup state; other failures matter.
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       return DEFAULT_CONFIG;
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${path}: ${message}`);
   }
+  return parseConfig(raw, path);
+}
+
+// Preserve defaults when a config only overrides selected nested quota settings.
+function parseConfig(raw: unknown, source: string): StatuslineConfig {
+  if (!isRecord(raw)) throw new Error(`${source}: config must be an object`);
+  const quotas = raw.quotas ?? {};
+  if (!isRecord(quotas)) throw new Error(`${source}: quotas must be an object`);
+  for (const key of ["codex", "opencodeGo"] as const) {
+    if (quotas[key] !== undefined && typeof quotas[key] !== "boolean")
+      throw new Error(`${source}: quotas.${key} must be true or false`);
+  }
+  const opencodeGo = raw.opencodeGo;
+  if (opencodeGo !== undefined) {
+    if (!isRecord(opencodeGo))
+      throw new Error(`${source}: opencodeGo must be an object`);
+    if (
+      opencodeGo.workspaceId !== undefined &&
+      typeof opencodeGo.workspaceId !== "string"
+    )
+      throw new Error(`${source}: opencodeGo.workspaceId must be a string`);
+  }
+  return {
+    ...DEFAULT_CONFIG,
+    ...raw,
+    quotas: { ...DEFAULT_CONFIG.quotas, ...quotas },
+  } as StatuslineConfig;
 }
 
 // Strip empty opencodeGo blocks so a cleared workspaceId does not leave a stale
@@ -70,4 +93,8 @@ export async function saveConfig(
   } finally {
     await rm(temporary, { force: true });
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

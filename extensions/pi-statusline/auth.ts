@@ -36,15 +36,17 @@ export async function saveOpenCodeGoAuthToken(
 }
 
 async function loadAuth(path: string): Promise<Record<string, unknown>> {
+  let auth: unknown;
   try {
-    const auth = JSON.parse(await readFile(path, "utf8")) as unknown;
-    if (isRecord(auth)) return auth;
-    throw new Error(`${path}: expected a JSON object`);
+    auth = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
     // No secret file simply leaves the OpenCode Go quota unconfigured.
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${path}: ${message}`);
   }
+  if (isRecord(auth)) return auth;
+  throw new Error(`${path}: expected a JSON object`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
