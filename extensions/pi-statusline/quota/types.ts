@@ -5,7 +5,7 @@ export type QuotaProvider = "codex" | "opencode-go";
 export type QuotaWindow = {
   label: string;
   percentRemaining: number;
-  /** Decimal places for display. Derived from the raw API value precision. */
+  /** Decimal places for display. Adapters may derive it from the source value; the formatter defaults to 1. */
   precision?: number;
   resetsAt?: Date;
 };

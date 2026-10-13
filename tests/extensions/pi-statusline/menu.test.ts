@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadOpenCodeGoAuthCookie } from "../../../extensions/pi-statusline/auth.ts";
+import { loadOpenCodeGoAuthToken } from "../../../extensions/pi-statusline/auth.ts";
 import {
   loadConfig,
   type StatuslineConfig,
@@ -13,13 +13,13 @@ import { withTempDir } from "../../helpers.ts";
 test("commitStatuslineChanges leaves auth untouched when it was not changed", () =>
   withTempDir("pi-statusline-", async (dir) => {
     const authPath = join(dir, "auth.json");
-    const original = '{ "opencodeGo": { "authCookie": "old" } }\n';
+    const original = '{ "opencodeGo": { "authToken": "old" } }\n';
     await writeFile(authPath, original);
 
     await commitStatuslineChanges({
       config: { quotas: { codex: true, opencodeGo: false } },
-      authCookie: "replacement",
-      authCookieChanged: false,
+      authToken: "replacement",
+      authTokenChanged: false,
       configPath: join(dir, "config.json"),
       authPath,
     });
@@ -36,12 +36,12 @@ test("commitStatuslineChanges writes to the paths in its menu state", () =>
 
     await commitStatuslineChanges({
       config,
-      authCookie: "secret-cookie",
-      authCookieChanged: true,
+      authToken: "secret-token",
+      authTokenChanged: true,
       configPath,
       authPath,
     });
 
     assert.deepEqual(await loadConfig(configPath), config);
-    assert.equal(await loadOpenCodeGoAuthCookie(authPath), "secret-cookie");
+    assert.equal(await loadOpenCodeGoAuthToken(authPath), "secret-token");
   }));

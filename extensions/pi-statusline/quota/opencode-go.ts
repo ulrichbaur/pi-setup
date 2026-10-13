@@ -1,4 +1,4 @@
-/** Scrapes OpenCode Go dashboard usage and normalizes its changing HTML formats. */
+/** Fetches OpenCode Go usage from the console JSON API and normalizes meter windows. */
 
 import type {
   QuotaAdapter,
@@ -8,180 +8,73 @@ import type {
 } from "./types.ts";
 
 export type OpenCodeGoOptions = {
+  /** Sent as `x-org-id`. The status endpoint requires it. */
   workspaceId?: string;
-  authCookie?: string;
+  /** Sent as a Bearer token. */
+  authToken?: string;
 };
 
+const STATUS_URL = "https://opencode.ai/console/api/go/status";
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Gecko/20100101 Firefox/148.0";
-const SCRAPE_TIMEOUT_MS = 10_000;
+const FETCH_TIMEOUT_MS = 10_000;
 
-interface ScrapedWindow {
-  usagePercent: number;
-  resetInSec: number;
+/** A failure whose message is already fit for the footer. */
+class OpenCodeGoError extends Error {}
+
+// The API encodes micro-cent amounts as whole numbers, usually as strings.
+function parseMicroCents(value: unknown): number | undefined {
+  if (typeof value === "number")
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  return typeof value === "string" && /^\d+$/.test(value)
+    ? Number(value)
+    : undefined;
 }
 
-// Extract usage embedded in the dashboard's client-side data assignments.
-function parseWindow(html: string, name: string): ScrapedWindow | null {
-  const body = new RegExp(String.raw`${name}:\$R\[\d+\]=\{([^}]*)\}`).exec(
-    html,
-  )?.[1];
-  if (!body) return null;
-  const usagePercent = Number(/usagePercent:(-?\d+(?:\.\d+)?)/.exec(body)?.[1]);
-  const resetInSec = Number(/resetInSec:(-?\d+(?:\.\d+)?)/.exec(body)?.[1]);
-  return Number.isFinite(usagePercent) && Number.isFinite(resetInSec)
-    ? { usagePercent, resetInSec }
-    : null;
-}
+function parseMeter(
+  meter: unknown,
+  label: "5h" | "7d" | "30d",
+): QuotaWindow | undefined {
+  if (!isRecord(meter)) return undefined;
+  const limit = parseMicroCents(meter.limitMicroCents);
+  if (limit === undefined || limit <= 0) return undefined;
+  const used = parseMicroCents(meter.usedMicroCents ?? 0);
+  if (used === undefined) return undefined;
 
-// ─── data-slot HTML fallback ─────────────────────────────────────────────────
-
-// The HTML fallback reports resets as prose rather than seconds.
-function parseHumanReadableTime(timeStr: string): number | null {
-  const normalized = timeStr.toLowerCase().trim().replace(/\s+/g, " ");
-  if (["reset-now", "reset now", "now", "resets now"].includes(normalized))
-    return 0;
-
-  let total = 0;
-  const day = normalized.match(/(\d+(?:\.\d+)?)\s*days?/);
-  const hour = normalized.match(/(\d+(?:\.\d+)?)\s*hours?/);
-  const min = normalized.match(/(\d+(?:\.\d+)?)\s*minutes?/);
-  const sec = normalized.match(/(\d+(?:\.\d+)?)\s*seconds?/);
-  const hasDuration = Boolean(day || hour || min || sec);
-
-  if (day) total += Number(day[1]) * 86_400;
-  if (hour) total += Number(hour[1]) * 3_600;
-  if (min) total += Number(min[1]) * 60;
-  if (sec) total += Number(sec[1]);
-
-  return hasDuration ? total : null;
-}
-
-function parseDataSlotFormat(
-  html: string,
-): Partial<Record<"rolling" | "weekly" | "monthly", ScrapedWindow>> {
-  const result: Partial<
-    Record<"rolling" | "weekly" | "monthly", ScrapedWindow>
-  > = {};
-  const items = html.split(/data-slot="usage-item"/);
-
-  for (let i = 1; i < items.length; i++) {
-    const content = items[i];
-
-    const labelMatch = content.match(/data-slot="usage-label">([^<]+)</);
-    if (!labelMatch) continue;
-    const label = labelMatch[1].trim().toLowerCase();
-
-    const usageMatch = content.match(
-      /data-slot="usage-value">[^<0-9]*(\d+(?:\.\d+)?)[^<]*<\/span>/,
-    );
-    if (!usageMatch) continue;
-    const usagePercent = Number(usageMatch[1]);
-
-    const resetMatch = content.match(
-      /data-slot="(reset-time|reset-now)">([\s\S]*?)<\/span>/,
-    );
-    if (!resetMatch) continue;
-
-    const resetContent = resetMatch[2]
-      .replace(/<!--\$-->/g, "")
-      .replace(/<!--\/-->/g, "")
-      .replace(/Resets?\s*in\s*/i, "")
-      .trim();
-
-    const resetInSec =
-      resetMatch[1] === "reset-now" ? 0 : parseHumanReadableTime(resetContent);
-
-    if (
-      !Number.isFinite(usagePercent) ||
-      resetInSec === null ||
-      !Number.isFinite(resetInSec)
-    )
-      continue;
-
-    let windowKey: "rolling" | "weekly" | "monthly" | null = null;
-    if (label.includes("rolling")) windowKey = "rolling";
-    else if (label.includes("weekly")) windowKey = "weekly";
-    else if (label.includes("monthly")) windowKey = "monthly";
-
-    if (windowKey) result[windowKey] = { usagePercent, resetInSec };
-  }
-
-  return result;
-}
-
-function looksLikeDashboard(html: string): boolean {
-  return (
-    html.includes("rollingUsage") ||
-    html.includes("weeklyUsage") ||
-    html.includes("monthlyUsage") ||
-    html.includes('data-slot="usage-item"')
+  const percentRemaining = Math.min(
+    100,
+    Math.max(0, 100 - (used / limit) * 100),
   );
+  const resetsAt =
+    typeof meter.resetsAt === "string" && meter.resetsAt
+      ? new Date(meter.resetsAt)
+      : undefined;
+
+  return {
+    label,
+    percentRemaining,
+    resetsAt:
+      resetsAt instanceof Date && !Number.isNaN(resetsAt.getTime())
+        ? resetsAt
+        : undefined,
+  };
 }
 
-// ─── main adapter ────────────────────────────────────────────────────────────
-
-function decimalPlacesOf(value: number): number {
-  const parts = String(value).split(".");
-  return parts[1]?.length ?? 0;
-}
-
-function buildQuotaWindows(
-  scraped: Partial<Record<"rolling" | "weekly" | "monthly", ScrapedWindow>>,
-  now = Date.now(),
-): QuotaWindow[] {
-  const windowDefs: Array<{
-    key: "rolling" | "weekly" | "monthly";
-    label: "5h" | "7d" | "30d";
-  }> = [
-    { key: "rolling", label: "5h" },
-    { key: "weekly", label: "7d" },
-    { key: "monthly", label: "30d" },
-  ];
+export function parseOpenCodeGoStatus(data: unknown): QuotaWindow[] {
+  if (!isRecord(data)) return [];
+  const access = isRecord(data.access) ? data.access : undefined;
+  const meters = isRecord(access?.meters) ? access.meters : undefined;
+  if (!meters) return [];
 
   const windows: QuotaWindow[] = [];
-
-  for (const def of windowDefs) {
-    const w = scraped[def.key];
-    if (
-      !w ||
-      !Number.isFinite(w.usagePercent) ||
-      !Number.isFinite(w.resetInSec)
-    )
-      continue;
-
-    const percentRemaining = Math.min(100, Math.max(0, 100 - w.usagePercent));
-    const precision = decimalPlacesOf(w.usagePercent);
-    windows.push({
-      label: def.label,
-      percentRemaining,
-      precision,
-      resetsAt: new Date(now + Math.max(0, w.resetInSec) * 1000),
-    });
+  for (const window of [
+    parseMeter(meters.fiveHour, "5h"),
+    parseMeter(meters.week, "7d"),
+    parseMeter(meters.month, "30d"),
+  ]) {
+    if (window) windows.push(window);
   }
-
   return windows;
-}
-
-export function parseOpenCodeGoHtml(
-  html: string,
-  now = Date.now(),
-): QuotaWindow[] {
-  let rolling: ScrapedWindow | undefined =
-    parseWindow(html, "rollingUsage") ?? undefined;
-  let weekly: ScrapedWindow | undefined =
-    parseWindow(html, "weeklyUsage") ?? undefined;
-  let monthly: ScrapedWindow | undefined =
-    parseWindow(html, "monthlyUsage") ?? undefined;
-
-  // Prefer structured client data; fall back when the dashboard ships rendered data-slot markup.
-  if (!rolling && !weekly && !monthly) {
-    const dataSlot = parseDataSlotFormat(html);
-    rolling = dataSlot.rolling;
-    weekly = dataSlot.weekly;
-    monthly = dataSlot.monthly;
-  }
-  return buildQuotaWindows({ rolling, weekly, monthly }, now);
 }
 
 export function createOpenCodeGoQuotaAdapter(
@@ -190,67 +83,68 @@ export function createOpenCodeGoQuotaAdapter(
   return {
     provider: "opencode-go",
     async getQuota(ctx: QuotaAdapterContext): Promise<QuotaStatus | undefined> {
-      const { workspaceId, authCookie } = options;
-      if (!workspaceId || !authCookie) {
+      const workspaceId = options.workspaceId?.trim();
+      const authToken = options.authToken?.trim();
+      if (!workspaceId || !authToken) {
         const missing = [];
         if (!workspaceId) missing.push("workspaceId");
-        if (!authCookie) missing.push("pi-statusline.auth.json authCookie");
-        return {
-          provider: "opencode-go",
-          windows: [],
-          fetchedAt: new Date(),
-          error: `opencode-go: set ${missing.join(" + ")}`,
-        };
+        if (!authToken) missing.push("pi-statusline.auth.json authToken");
+        return errorStatus(`opencode-go: set ${missing.join(" + ")}`);
       }
 
-      const url = `https://opencode.ai/workspace/${encodeURIComponent(workspaceId)}/go`;
-
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), SCRAPE_TIMEOUT_MS);
+      const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-      // Respect Pi shutdown/cancellation as well as the dashboard request timeout.
+      // Respect Pi shutdown/cancellation as well as the console request timeout.
       const onAbort = () => controller.abort();
       ctx.signal?.addEventListener("abort", onAbort, { once: true });
 
       try {
-        const response = await fetch(url, {
+        const response = await fetch(STATUS_URL, {
           headers: {
-            Cookie: `auth=${authCookie}`,
+            // The server checks Bearer before cookies, so cookies add nothing.
+            Authorization: `Bearer ${authToken}`,
+            "x-org-id": workspaceId,
             "User-Agent": USER_AGENT,
-            Accept: "text/html",
+            Accept: "application/json",
           },
           signal: controller.signal,
         });
 
+        if (response.status === 401) {
+          throw new OpenCodeGoError(
+            "OpenCode Go auth invalid or session expired",
+          );
+        }
         if (!response.ok) {
-          throw new Error(`OpenCode Go dashboard error ${response.status}`);
-        }
-
-        // A login redirect can still return 200, so verify that fetch stayed on the dashboard.
-        if (!response.url.includes(`/workspace/${workspaceId}/go`)) {
-          throw new Error("OpenCode Go auth invalid or session expired");
-        }
-
-        const html = await response.text();
-
-        const windows = parseOpenCodeGoHtml(html);
-        if (!windows.length) {
-          // Page fetched and looks like the dashboard, but nothing parsed:
-          // the markup likely changed. Surface that instead of vanishing.
-          if (looksLikeDashboard(html)) {
-            return {
-              provider: "opencode-go",
-              windows: [],
-              fetchedAt: new Date(),
-              error: "opencode-go: no usage parsed — parser may be outdated",
-            };
+          const tag = await errorTag(response);
+          if (response.status === 400 && tag === "OrgRequired") {
+            return errorStatus(
+              "opencode-go: workspace ID rejected (OrgRequired)",
+            );
           }
-          throw new Error(
-            "OpenCode Go response does not look like the dashboard",
+          throw new OpenCodeGoError(
+            `OpenCode Go status error ${response.status}${tag ? ` (${tag})` : ""}`,
+          );
+        }
+
+        // A login page or proxy can answer with HTML; do not parse it as JSON.
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.includes("application/json")) {
+          throw new OpenCodeGoError(
+            `OpenCode Go returned an unexpected response (${contentType || "no content type"})`,
+          );
+        }
+
+        const windows = parseOpenCodeGoStatus(await response.json());
+        if (!windows.length) {
+          return errorStatus(
+            "opencode-go: no usage meters (no active plan, or the API changed)",
           );
         }
         return { provider: "opencode-go", windows, fetchedAt: new Date() };
       } catch (err) {
+        if (err instanceof OpenCodeGoError) throw err;
         const message = err instanceof Error ? err.message : String(err);
         throw new Error(
           `OpenCode Go quota fetch failed: ${message.slice(0, 200)}`,
@@ -261,4 +155,23 @@ export function createOpenCodeGoQuotaAdapter(
       }
     },
   };
+}
+
+function errorStatus(error: string): QuotaStatus {
+  return { provider: "opencode-go", windows: [], fetchedAt: new Date(), error };
+}
+
+// Error bodies look like `{"_tag":"OrgRequired"}`. Show only the tag, never raw body text.
+async function errorTag(response: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = JSON.parse(await response.text());
+    const tag = isRecord(body) ? body._tag : undefined;
+    return typeof tag === "string" && /^\w{1,64}$/.test(tag) ? tag : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

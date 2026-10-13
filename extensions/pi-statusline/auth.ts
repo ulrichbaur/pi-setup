@@ -1,29 +1,27 @@
-/** Loads and updates the OpenCode Go cookie in the statusline's local secret file. */
+/** Loads and updates the OpenCode Go auth token in the statusline's local secret file. */
 
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AUTH_PATH } from "./config.ts";
 
 // Keep secrets out of the regular config and its diagnostic command output.
-export async function loadOpenCodeGoAuthCookie(
+export async function loadOpenCodeGoAuthToken(
   path = AUTH_PATH,
 ): Promise<string | undefined> {
   const auth = await loadAuth(path);
   const opencodeGo = isRecord(auth) ? auth.opencodeGo : undefined;
-  const cookie = isRecord(opencodeGo) ? opencodeGo.authCookie : undefined;
-  return typeof cookie === "string" && cookie.trim()
-    ? cookie.trim()
-    : undefined;
+  const token = isRecord(opencodeGo) ? opencodeGo.authToken : undefined;
+  return typeof token === "string" && token.trim() ? token.trim() : undefined;
 }
 
 // Update only this extension's credential so future secret fields survive unchanged.
-export async function saveOpenCodeGoAuthCookie(
-  cookie: string,
+export async function saveOpenCodeGoAuthToken(
+  token: string,
   path = AUTH_PATH,
 ): Promise<void> {
   const auth = await loadAuth(path);
   const opencodeGo = isRecord(auth.opencodeGo) ? auth.opencodeGo : {};
-  auth.opencodeGo = { ...opencodeGo, authCookie: cookie.trim() };
+  auth.opencodeGo = { ...opencodeGo, authToken: token.trim() };
 
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.tmp`;

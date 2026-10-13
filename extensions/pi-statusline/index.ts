@@ -9,14 +9,14 @@
  * 5h: 25% ↺ 2h15m | 7d: 80% ↺ 3d4h
  *
  * Use `/statusline` to open an interactive editor for the underlying config
- * and OpenCode Go auth cookie.
+ * and OpenCode Go auth token.
  */
 
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { loadOpenCodeGoAuthCookie } from "./auth.ts";
+import { loadOpenCodeGoAuthToken } from "./auth.ts";
 import { AUTH_PATH, CONFIG_PATH, loadConfig } from "./config.ts";
 import {
   commitStatuslineChanges,
@@ -30,9 +30,9 @@ import type { QuotaAdapter } from "./quota/types.ts";
 import { createStatuslineRuntime } from "./statusline.ts";
 
 export default async function (pi: ExtensionAPI) {
-  const [config, authCookie] = await Promise.all([
+  const [config, authToken] = await Promise.all([
     loadConfig(),
-    loadOpenCodeGoAuthCookie(),
+    loadOpenCodeGoAuthToken(),
   ]);
   const adapters: QuotaAdapter[] = [];
 
@@ -43,7 +43,7 @@ export default async function (pi: ExtensionAPI) {
       withQuotaCache(
         createOpenCodeGoQuotaAdapter({
           workspaceId: config.opencodeGo?.workspaceId,
-          authCookie,
+          authToken,
         }),
       ),
     );
@@ -64,14 +64,14 @@ export default async function (pi: ExtensionAPI) {
     description: "Edit statusline configuration and credentials",
     handler: async (_args, ctx) => {
       // Re-read so the menu reflects any external edits made since startup.
-      const [liveConfig, liveCookie] = await Promise.all([
+      const [liveConfig, liveToken] = await Promise.all([
         loadConfig(),
-        loadOpenCodeGoAuthCookie(),
+        loadOpenCodeGoAuthToken(),
       ]);
       const initial: MenuState = {
         config: liveConfig,
-        authCookie: liveCookie,
-        authCookieChanged: false,
+        authToken: liveToken,
+        authTokenChanged: false,
         configPath: CONFIG_PATH,
         authPath: AUTH_PATH,
       };

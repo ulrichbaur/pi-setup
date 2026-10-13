@@ -1,7 +1,7 @@
 /**
- * Interactive menu for editing the statusline config and OpenCode Go auth cookie.
+ * Interactive menu for editing the statusline config and OpenCode Go auth token.
  *
- * The menu keeps a working copy of the config and cookie in memory and reports
+ * The menu keeps a working copy of the config and token in memory and reports
  * back the user's verdict ("save" or "discard"). The caller decides when to
  * persist the working state so the menu never touches disk on its own.
  */
@@ -21,13 +21,13 @@ import {
   SettingsList,
   Text,
 } from "@earendil-works/pi-tui";
-import { saveOpenCodeGoAuthCookie } from "./auth.ts";
+import { saveOpenCodeGoAuthToken } from "./auth.ts";
 import { type StatuslineConfig, saveConfig } from "./config.ts";
 
 export type MenuState = {
   config: StatuslineConfig;
-  authCookie: string | undefined;
-  authCookieChanged: boolean;
+  authToken: string | undefined;
+  authTokenChanged: boolean;
   configPath: string;
   authPath: string;
 };
@@ -69,16 +69,16 @@ export async function showStatuslineMenu(
       }
     } else if (action.kind === "edit-auth") {
       const result = await ctx.ui.input(
-        "OpenCode Go auth cookie",
-        "Paste the cookie (leave empty to keep current)",
+        "OpenCode Go auth token",
+        "Paste the __Host-console_session cookie value (leave empty to keep current)",
       );
       if (result !== undefined) {
         const trimmed = result.trim();
         if (trimmed) {
           current = {
             ...current,
-            authCookie: trimmed,
-            authCookieChanged: true,
+            authToken: trimmed,
+            authTokenChanged: true,
           };
         }
       }
@@ -94,8 +94,8 @@ export async function showStatuslineMenu(
 
 // Write the working state to disk; called by index.ts after the menu resolves.
 export async function commitStatuslineChanges(state: MenuState): Promise<void> {
-  if (state.authCookieChanged && state.authCookie) {
-    await saveOpenCodeGoAuthCookie(state.authCookie, state.authPath);
+  if (state.authTokenChanged && state.authToken) {
+    await saveOpenCodeGoAuthToken(state.authToken, state.authPath);
   }
   await saveConfig(state.config, state.configPath);
 }
@@ -120,8 +120,8 @@ async function showTopMenu(
       },
       {
         value: "edit-auth",
-        label: "OpenCode Go auth cookie",
-        description: state.authCookie ? "(set)" : "(unset)",
+        label: "OpenCode Go auth token",
+        description: state.authToken ? "(set)" : "(unset)",
       },
       {
         value: "show-config",
@@ -131,7 +131,7 @@ async function showTopMenu(
       {
         value: "save",
         label: "Save & reload",
-        description: state.authCookieChanged
+        description: state.authTokenChanged
           ? "persist pending changes"
           : "rewrite config (no auth changes)",
       },

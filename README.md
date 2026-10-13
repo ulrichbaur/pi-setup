@@ -57,7 +57,7 @@ available Codex or OpenCode Go quota windows. It runs only in TUI mode.
 
 Quota display is enabled by default. Configure it interactively with
 `/statusline`, which opens a menu for toggling the Codex and OpenCode Go
-quota sources, editing the OpenCode Go workspace ID, setting the auth cookie,
+quota sources, editing the OpenCode Go workspace ID, setting the auth token,
 and previewing the current config. Changes are kept in memory until you
 choose **Save & reload**; **Discard & exit** drops them. The menu re-reads the
 on-disk config on open, so external edits show up correctly.
@@ -77,14 +77,17 @@ The non-secret config lives in `~/.pi/agent/pi-statusline.json` (or below
 }
 ```
 
-Codex uses Pi's `openai-codex` login. OpenCode Go additionally requires its
-`auth` cookie value in `~/.pi/agent/pi-statusline.auth.json` (or below
-`PI_CODING_AGENT_DIR`):
+Codex uses Pi's `openai-codex` login.
+OpenCode Go requires both the workspace ID and an auth token.
+The workspace ID is sent as the `x-org-id` header; requests without it fail.
+The auth token is the value of the `__Host-console_session` cookie
+from a logged-in opencode.ai console session.
+It goes in `~/.pi/agent/pi-statusline.auth.json` (or below `PI_CODING_AGENT_DIR`):
 
 ```json
 {
   "opencodeGo": {
-    "authCookie": "cookie-value"
+    "authToken": "token-value"
   }
 }
 ```
