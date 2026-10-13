@@ -1,11 +1,12 @@
 /**
  * Replaces Pi's TUI footer with compact session details: location, branch,
- * provider/model, thinking level, context use, cost, cache-hit rate, and
- * optional Codex or OpenCode Go quota windows.
+ * and session name; context use, token counts, cache-hit rate, and cost;
+ * provider, model, and thinking level; and the active provider's Codex or
+ * OpenCode Go quota windows.
  *
- * Example:
+ * Example (the model details are right-aligned):
  * ~/repo (main) • session-name
- * codex/gpt-5 (high) · 25.0%/200k · $0.123 CH75.0%
+ * 25.0%/200k · ↑120k ↓8.4k · CH75.0% · $0.123      (openai-codex) gpt-5 • high
  * 5h: 25% ↺ 2h15m | 7d: 80% ↺ 3d4h
  *
  * Use `/statusline` to open an interactive editor for the underlying config

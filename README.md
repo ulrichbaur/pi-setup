@@ -52,8 +52,9 @@ after installing or updating extensions; policy changes apply without a reload.
 ### Pi statusline
 
 `extensions/pi-statusline/` replaces Pi's TUI footer with the active
-provider/model, thinking level, context use, session cost, cache-hit rate, and
-available Codex or OpenCode Go quota windows. It runs only in TUI mode.
+provider/model, thinking level, context use, token counts, session cost,
+cache-hit rate, and the active provider's Codex or OpenCode Go quota windows.
+It runs only in TUI mode.
 
 Quota display is enabled by default. Configure it interactively with
 `/statusline`, which opens a menu for toggling the Codex and OpenCode Go
