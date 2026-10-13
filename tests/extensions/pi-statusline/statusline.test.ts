@@ -138,6 +138,68 @@ test("statusline is inert outside TUI mode", async () => {
   assert.equal(quotaCalls, 0);
 });
 
+test("statusline redraws while idle and refreshes once a window resets", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"], now: 0 });
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  const footerCalls: unknown[] = [];
+  let renders = 0;
+  let calls = 0;
+  const adapter: QuotaAdapter = {
+    provider: "codex",
+    async getQuota() {
+      calls++;
+      return quota({
+        windows: [
+          {
+            label: "5h",
+            percentRemaining: 75,
+            resetsAt: new Date(Date.now() + 45_000),
+          },
+        ],
+      });
+    },
+  };
+  const runtime = createStatuslineRuntime(
+    { getThinkingLevel: () => "off" } as ExtensionAPI,
+    [adapter],
+  );
+  const ctx = makeContext("tui", {
+    setFooter: (value) => footerCalls.push(value),
+  });
+  await runtime.update(ctx);
+  const factory = footerCalls[0] as (
+    tui: unknown,
+    theme: unknown,
+    data: unknown,
+  ) => unknown;
+  factory(
+    { requestRender: () => renders++ },
+    { fg: (_color: string, text: string) => text },
+    { getGitBranch: () => null },
+  );
+
+  // 30 s: the reset at 45 s has not passed, so the tick only redraws.
+  t.mock.timers.tick(30_000);
+  await flush();
+  assert.equal(renders, 1);
+  assert.equal(calls, 1);
+
+  // 60 s: the reset has passed, so the tick refreshes once.
+  t.mock.timers.tick(30_000);
+  await flush();
+  assert.equal(calls, 2);
+
+  // 90 s: the refreshed window resets at 105 s, so no further refresh.
+  t.mock.timers.tick(30_000);
+  await flush();
+  assert.equal(calls, 2);
+
+  runtime.dispose(ctx);
+  const rendersAfterDispose = renders;
+  t.mock.timers.tick(60_000);
+  assert.equal(renders, rendersAfterDispose);
+});
+
 function makeContext(
   mode: "tui" | "rpc",
   ui: { setFooter(value: unknown): void },

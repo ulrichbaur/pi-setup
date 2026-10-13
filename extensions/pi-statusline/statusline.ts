@@ -16,6 +16,9 @@ import {
 } from "./format.ts";
 import type { QuotaAdapter, QuotaStatus } from "./quota/types.ts";
 
+// Countdowns age while Pi is idle and no event redraws the footer.
+const TICK_MS = 30_000;
+
 export type StatuslineRuntime = {
   update(ctx: ExtensionContext): Promise<void>;
   dispose(ctx: ExtensionContext): void;
@@ -30,11 +33,31 @@ export function createStatuslineRuntime(
   let latestSnapshot: StatusSnapshot = {};
   let requestRender: (() => void) | undefined;
   let updateVersion = 0;
+  let lastCtx: ExtensionContext | undefined;
+  let tick: ReturnType<typeof setInterval> | undefined;
+  let refreshedResetAt = 0;
+
+  // Redraw countdowns, and refresh once when a shown window has reset.
+  function onTick(): void {
+    requestRender?.();
+    const now = Date.now();
+    const passed = (latestSnapshot.quota?.windows ?? [])
+      .map((window) => window.resetsAt?.getTime() ?? 0)
+      .filter((time) => time > 0 && time <= now);
+    const latest = Math.max(0, ...passed);
+    if (latest > refreshedResetAt && lastCtx) {
+      refreshedResetAt = latest;
+      void update(lastCtx);
+    }
+  }
 
   // Pi owns one footer; install it once and update the closed-over rendered values.
   function installFooter(ctx: ExtensionContext): void {
     if (footerInstalled || ctx.mode !== "tui") return;
     footerInstalled = true;
+    tick = setInterval(onTick, TICK_MS);
+    // The timer only serves the footer; it must not keep Pi running.
+    tick.unref?.();
     ctx.ui.setFooter((tui, theme, footerData) => {
       requestRender = () => tui.requestRender();
       const unsubscribe = footerData.onBranchChange?.(() =>
@@ -83,6 +106,7 @@ export function createStatuslineRuntime(
     // TUI-only: the footer is the sole display surface.
     if (!ctx.hasUI || ctx.mode !== "tui") return;
 
+    lastCtx = ctx;
     const provider = ctx.model?.provider;
     const version = ++updateVersion;
 
@@ -109,6 +133,9 @@ export function createStatuslineRuntime(
 
   function dispose(ctx: ExtensionContext): void {
     updateVersion++;
+    clearInterval(tick);
+    tick = undefined;
+    lastCtx = undefined;
     if (ctx.mode === "tui" && footerInstalled) {
       ctx.ui.setFooter(undefined);
       footerInstalled = false;
