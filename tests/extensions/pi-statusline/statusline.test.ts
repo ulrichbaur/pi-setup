@@ -200,6 +200,32 @@ test("statusline redraws while idle and refreshes once a window resets", async (
   assert.equal(renders, rendersAfterDispose);
 });
 
+test("cancelling a turn does not cancel quota requests; shutdown does", async () => {
+  const turn = new AbortController();
+  let received: AbortSignal | undefined;
+  const adapter: QuotaAdapter = {
+    provider: "codex",
+    async getQuota({ signal }) {
+      received = signal;
+      return quota();
+    },
+  };
+  const runtime = createStatuslineRuntime(
+    { getThinkingLevel: () => "off" } as ExtensionAPI,
+    [adapter],
+  );
+  const ctx = {
+    ...makeContext("tui", { setFooter: () => {} }),
+    signal: turn.signal,
+  } as ExtensionContext;
+  await runtime.update(ctx);
+
+  turn.abort();
+  assert.equal(received?.aborted, false);
+  runtime.dispose(ctx);
+  assert.equal(received?.aborted, true);
+});
+
 function makeContext(
   mode: "tui" | "rpc",
   ui: { setFooter(value: unknown): void },

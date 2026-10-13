@@ -36,6 +36,8 @@ export function createStatuslineRuntime(
   let lastCtx: ExtensionContext | undefined;
   let tick: ReturnType<typeof setInterval> | undefined;
   let refreshedResetAt = 0;
+  // Quota requests outlive the turn that triggered them; only shutdown cancels them.
+  let shutdown = new AbortController();
 
   // Redraw countdowns, and refresh once when a shown window has reset.
   function onTick(): void {
@@ -118,7 +120,9 @@ export function createStatuslineRuntime(
     installFooter(ctx);
     requestRender?.();
 
-    const quota = await resolveQuota(ctx, adapters).catch(() => undefined);
+    const quota = await resolveQuota(ctx, adapters, shutdown.signal).catch(
+      () => undefined,
+    );
     // A model/session event may have started a newer update while quota I/O was pending.
     if (version !== updateVersion) return;
     // Keep the last usable reading visible while a refresh is temporarily unavailable.
@@ -136,6 +140,8 @@ export function createStatuslineRuntime(
     clearInterval(tick);
     tick = undefined;
     lastCtx = undefined;
+    shutdown.abort();
+    shutdown = new AbortController();
     if (ctx.mode === "tui" && footerInstalled) {
       ctx.ui.setFooter(undefined);
       footerInstalled = false;
@@ -149,6 +155,7 @@ export function createStatuslineRuntime(
 async function resolveQuota(
   ctx: ExtensionContext,
   adapters: QuotaAdapter[],
+  signal: AbortSignal,
 ): Promise<QuotaStatus | undefined> {
   const provider = ctx.model?.provider;
   const adapter = adapters.find(
@@ -157,7 +164,7 @@ async function resolveQuota(
   );
   if (!adapter) return undefined;
   return adapter.getQuota({
-    signal: ctx.signal,
+    signal,
     modelRegistry: ctx.modelRegistry,
   });
 }
