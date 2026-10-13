@@ -69,8 +69,7 @@ function parseConfig(raw: unknown, source: string): StatuslineConfig {
   } as StatuslineConfig;
 }
 
-// Strip empty opencodeGo blocks so a cleared workspaceId does not leave a stale
-// `opencodeGo: {}` behind in the persisted file.
+// Strip an empty opencodeGo block so the persisted file holds only real settings.
 function compactConfig(config: StatuslineConfig): StatuslineConfig {
   const opencodeGo =
     config.opencodeGo && Object.keys(config.opencodeGo).length > 0

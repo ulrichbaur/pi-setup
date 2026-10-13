@@ -52,35 +52,35 @@ export async function showStatuslineMenu(
       const next = await showQuotasMenu(current.config, ctx);
       current = { ...current, config: next };
     } else if (action.kind === "edit-workspace") {
-      const result = await ctx.ui.input(
-        "OpenCode Go workspace ID",
-        "Leave empty to clear",
-      );
-      if (result !== undefined) {
-        const trimmed = result.trim();
-        const existing = current.config.opencodeGo ?? {};
-        const { workspaceId: _drop, ...rest } = existing;
-        const opencodeGo = trimmed
-          ? { ...rest, workspaceId: trimmed }
-          : Object.keys(rest).length > 0
-            ? rest
-            : undefined;
+      // Both fields are required while the quota is on, so an empty entry keeps
+      // the current value; disabling the quota replaces clearing it.
+      const workspaceId = current.config.opencodeGo?.workspaceId;
+      const result = (
+        await ctx.ui.input(
+          "OpenCode Go workspace ID",
+          workspaceId
+            ? `${workspaceId} (leave empty to keep)`
+            : "Paste the workspace ID",
+        )
+      )?.trim();
+      if (result) {
+        const opencodeGo = {
+          ...current.config.opencodeGo,
+          workspaceId: result,
+        };
         current = { ...current, config: { ...current.config, opencodeGo } };
       }
     } else if (action.kind === "edit-auth") {
-      const result = await ctx.ui.input(
-        "OpenCode Go auth token",
-        "Paste the __Host-console_session cookie value (leave empty to keep current)",
-      );
-      if (result !== undefined) {
-        const trimmed = result.trim();
-        if (trimmed) {
-          current = {
-            ...current,
-            authToken: trimmed,
-            authTokenChanged: true,
-          };
-        }
+      const result = (
+        await ctx.ui.input(
+          "OpenCode Go auth token",
+          current.authToken
+            ? "Paste a new __Host-console_session cookie value (leave empty to keep)"
+            : "Paste the __Host-console_session cookie value",
+        )
+      )?.trim();
+      if (result) {
+        current = { ...current, authToken: result, authTokenChanged: true };
       }
     } else if (action.kind === "show-config") {
       await showConfigDialog(current, ctx);
