@@ -123,3 +123,46 @@ test("quota cache replaces a good reading with an error status at once", async (
   assert.equal(status?.error, "codex: login rejected, re-run pi login");
   assert.equal(status?.stale, undefined);
 });
+
+test("quota cache aborts a hung request so later refreshes can run", async () => {
+  let now = 1;
+  let calls = 0;
+  const adapter: QuotaAdapter = {
+    provider: "codex",
+    getQuota: ({ signal }) => {
+      calls++;
+      return new Promise((_resolve, reject) =>
+        signal?.addEventListener("abort", () => reject(signal.reason)),
+      );
+    },
+  };
+  const cached = withQuotaCache(adapter, {
+    now: () => now,
+    ttlOkMs: 1,
+    ttlRetryMs: 1,
+    staleFailureLimit: 1,
+    timeoutMs: 10,
+  });
+
+  const status = await cached.getQuota({});
+  assert.match(status?.error ?? "", /^codex: .*timeout/i);
+  now = 3;
+  await cached.getQuota({});
+  assert.equal(calls, 2);
+});
+
+test("quota cache forwards Pi's abort signal to the adapter", async () => {
+  const controller = new AbortController();
+  let received: AbortSignal | undefined;
+  const cached = withQuotaCache({
+    provider: "codex",
+    getQuota: async ({ signal }) => {
+      received = signal;
+      return quota();
+    },
+  });
+  await cached.getQuota({ signal: controller.signal });
+  assert.equal(received?.aborted, false);
+  controller.abort();
+  assert.equal(received?.aborted, true);
+});

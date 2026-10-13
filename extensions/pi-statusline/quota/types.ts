@@ -21,6 +21,7 @@ export type QuotaStatus = {
 };
 
 export type QuotaAdapterContext = {
+  /** Aborts on Pi shutdown or when the cache's request timeout expires. */
   signal?: AbortSignal;
   modelRegistry?: {
     getApiKeyForProvider(provider: string): Promise<string | undefined>;

@@ -17,7 +17,6 @@ export type OpenCodeGoOptions = {
 const STATUS_URL = "https://opencode.ai/console/api/go/status";
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Gecko/20100101 Firefox/148.0";
-const FETCH_TIMEOUT_MS = 10_000;
 
 /** A failure whose message is already fit for the footer. */
 class OpenCodeGoError extends Error {}
@@ -92,13 +91,6 @@ export function createOpenCodeGoQuotaAdapter(
         return errorStatus(`opencode-go: set ${missing.join(" + ")}`);
       }
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-      // Respect Pi shutdown/cancellation as well as the console request timeout.
-      const onAbort = () => controller.abort();
-      ctx.signal?.addEventListener("abort", onAbort, { once: true });
-
       try {
         const response = await fetch(STATUS_URL, {
           headers: {
@@ -108,7 +100,7 @@ export function createOpenCodeGoQuotaAdapter(
             "User-Agent": USER_AGENT,
             Accept: "application/json",
           },
-          signal: controller.signal,
+          signal: ctx.signal,
         });
 
         if (response.status === 401) {
@@ -147,9 +139,6 @@ export function createOpenCodeGoQuotaAdapter(
         throw new Error(
           `OpenCode Go quota fetch failed: ${message.slice(0, 200)}`,
         );
-      } finally {
-        clearTimeout(timeout);
-        ctx.signal?.removeEventListener("abort", onAbort);
       }
     },
   };
