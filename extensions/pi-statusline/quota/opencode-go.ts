@@ -112,9 +112,7 @@ export function createOpenCodeGoQuotaAdapter(
         });
 
         if (response.status === 401) {
-          throw new OpenCodeGoError(
-            "OpenCode Go auth invalid or session expired",
-          );
+          return errorStatus("opencode-go: auth token rejected or expired");
         }
         if (!response.ok) {
           const tag = await errorTag(response);

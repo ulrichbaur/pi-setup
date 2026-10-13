@@ -62,6 +62,14 @@ test("Codex adapter reports definitive failures instead of throwing", async (t) 
     "codex: no usage parsed, response shape may have changed",
   );
 
+  let calls = 0;
+  globalThis.fetch = async () =>
+    ({ ok: false, status: calls++ === 0 ? 404 : 401 }) as Response;
+  assert.equal(
+    (await adapter.getQuota({}))?.error,
+    "codex: login rejected, re-run pi login",
+  );
+
   globalThis.fetch = async () => ({ ok: false, status: 404 }) as Response;
   await assert.rejects(adapter.getQuota({}), /request failed \(404\)/);
 });

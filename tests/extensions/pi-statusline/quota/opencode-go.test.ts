@@ -155,9 +155,10 @@ test("OpenCode Go adapter reports each failure clearly", async (t) => {
   });
 
   globalThis.fetch = async () => json({ _tag: "Unauthorized" }, 401);
-  await assert.rejects(adapter.getQuota({}), {
-    message: "OpenCode Go auth invalid or session expired",
-  });
+  assert.equal(
+    (await adapter.getQuota({}))?.error,
+    "opencode-go: auth token rejected or expired",
+  );
 
   globalThis.fetch = async () => json({ _tag: "OrgRequired" }, 400);
   assert.equal(

@@ -100,3 +100,26 @@ test("quota cache reports a source that never answered", async () => {
     "opencode-go: no usage returned",
   );
 });
+
+test("quota cache replaces a good reading with an error status at once", async () => {
+  let now = 1;
+  let rejected = false;
+  const adapter: QuotaAdapter = {
+    provider: "codex",
+    getQuota: async () =>
+      rejected
+        ? quota({
+            windows: [],
+            error: "codex: login rejected, re-run pi login",
+          })
+        : quota(),
+  };
+  const cached = withQuotaCache(adapter, { now: () => now, ttlOkMs: 1 });
+
+  assert.equal((await cached.getQuota({}))?.windows.length, 1);
+  rejected = true;
+  now = 2;
+  const status = await cached.getQuota({});
+  assert.equal(status?.error, "codex: login rejected, re-run pi login");
+  assert.equal(status?.stale, undefined);
+});

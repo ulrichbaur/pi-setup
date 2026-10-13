@@ -51,8 +51,6 @@ export type CodexAdapterOptions = {
   readAuth?: () => Promise<CodexCredentials | undefined>;
 };
 
-// Definitive states return an error status the footer can show. Only
-// transient failures throw; the cache turns repeated ones into an error.
 function errorStatus(message: string): QuotaStatus {
   return {
     provider: "codex",
@@ -85,10 +83,12 @@ export function createCodexQuotaAdapter(
       };
 
       let lastStatus: number | undefined;
+      let rejected = false;
       for (const url of CODEX_USAGE_URLS) {
         const response = await fetch(url, { headers, signal: ctx.signal });
         if (!response.ok) {
           lastStatus = response.status;
+          rejected ||= response.status === 401;
           continue;
         }
         const status = normalizeCodexUsage(
@@ -99,6 +99,9 @@ export function createCodexQuotaAdapter(
           errorStatus("codex: no usage parsed, response shape may have changed")
         );
       }
+      // A retired URL answers 404, so one 401 from either URL means the login was rejected.
+      if (rejected)
+        return errorStatus("codex: login rejected, re-run pi login");
       throw new Error(`Codex usage request failed (${lastStatus})`);
     },
   };

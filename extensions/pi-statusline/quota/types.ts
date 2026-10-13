@@ -29,5 +29,11 @@ export type QuotaAdapterContext = {
 
 export type QuotaAdapter = {
   provider: QuotaProvider;
+  /**
+   * Returns an error status for states a retry cannot fix, such as missing
+   * setup or rejected credentials, so the footer shows them at once.
+   * Throws only for failures that may pass, such as network errors;
+   * the cache reports those after repeated attempts.
+   */
   getQuota(ctx: QuotaAdapterContext): Promise<QuotaStatus | undefined>;
 };
