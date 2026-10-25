@@ -312,6 +312,11 @@ export class AgentsOverlay implements Component, Focusable {
         this.theme.fg("error", ` Error: ${run.result.progress.error}`),
       );
     }
+    if (run.result.progress.warning) {
+      lines.push(
+        this.theme.fg("warning", ` Warning: ${run.result.progress.warning}`),
+      );
+    }
 
     const active = isActive(run);
     const footer: string[] = [];

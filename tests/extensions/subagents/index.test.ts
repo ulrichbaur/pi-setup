@@ -9,6 +9,7 @@ import {
   assertSupportedTools,
   CONFIG_PATH,
   DEFAULT_CONFIG,
+  finalStatus,
   parseSubagentConfig,
   planRun,
   selectSubagentModel,
@@ -345,4 +346,56 @@ test("progress tracks tools that run at the same time", () => {
     { tool: "read", args: "lib/x.ts" },
   ]);
   assert.equal(result.progress.toolCount, 2);
+});
+
+test("a successful retry clears the failed turn's error", () => {
+  const result: Parameters<typeof applyEvent>[0] = {
+    agent: "scout",
+    task: "t",
+    output: "",
+    exitCode: -1,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+      turns: 0,
+    },
+    progress: {
+      status: "running",
+      recentTools: [],
+      toolCount: 0,
+      durationMs: 0,
+      lastMessage: "",
+    },
+  };
+  const turn = (message: Record<string, unknown>) =>
+    applyEvent(result, {
+      type: "message_end",
+      message: { role: "assistant", content: "", ...message },
+    });
+
+  turn({ stopReason: "error", errorMessage: "fetch failed" });
+  assert.equal(result.progress.error, "fetch failed");
+  turn({ stopReason: "stop", content: "Done." });
+  assert.equal(result.progress.error, undefined);
+  assert.equal(result.output, "Done.");
+
+  turn({ stopReason: "aborted" });
+  assert.equal(result.progress.error, "Agent stopped: aborted");
+  applyEvent(result, {
+    type: "auto_retry_end",
+    success: false,
+    finalError: "529 overloaded",
+  });
+  assert.equal(result.progress.error, "529 overloaded");
+});
+
+test("a settled run survives a forced stop; other failures do not", () => {
+  assert.equal(finalStatus(0, true, false, undefined), "completed");
+  assert.equal(finalStatus(1, true, true, undefined), "completed");
+  assert.equal(finalStatus(1, false, true, undefined), "failed");
+  assert.equal(finalStatus(1, true, false, undefined), "failed");
+  assert.equal(finalStatus(0, true, false, "fetch failed"), "failed");
 });

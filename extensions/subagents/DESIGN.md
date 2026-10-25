@@ -24,6 +24,12 @@
 - On abort, send the `abort` command, then close stdin.
   Signals are only a fallback when the child does not exit.
 - A child that exits before `agent_settled` fails the run and shows its stderr.
+- A child that reached `agent_settled` but had to be stopped with a signal
+  keeps its answer and gets a warning with its stderr.
+  Pi writes each session entry at once, so the session is complete.
+- A successful turn clears the error of an earlier failed turn,
+  because Pi's retry recovered.
+  A retry that finally fails sets the run's error.
 
 ## Dialogs
 

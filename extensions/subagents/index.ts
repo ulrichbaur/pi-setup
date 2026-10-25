@@ -104,6 +104,8 @@ interface AgentProgress {
   durationMs: number;
   lastMessage: string;
   error?: string;
+  // Something went wrong that did not cost the run its answer.
+  warning?: string;
 }
 
 export interface AgentResult {
@@ -447,6 +449,13 @@ export function applyEvent(result: AgentResult, record: RpcRecord): void {
     showLatestRunningTool(result);
     return;
   }
+  if (event.type === "auto_retry_end" && record.success === false) {
+    result.progress.error =
+      typeof record.finalError === "string"
+        ? record.finalError
+        : "Retries failed";
+    return;
+  }
   if (event.type !== "message_end" || !isRecord(event.message)) return;
   if (event.message.role !== "assistant") return;
 
@@ -455,14 +464,19 @@ export function applyEvent(result: AgentResult, record: RpcRecord): void {
   if (typeof event.message.model === "string") {
     result.model = event.message.model;
   }
-  if (typeof event.message.errorMessage === "string") {
-    result.progress.error = event.message.errorMessage;
-  }
+  const { errorMessage, stopReason } = event.message;
   if (
-    event.message.stopReason === "error" ||
-    event.message.stopReason === "aborted"
+    typeof errorMessage === "string" ||
+    stopReason === "error" ||
+    stopReason === "aborted"
   ) {
-    result.progress.error ??= `Agent stopped: ${event.message.stopReason}`;
+    result.progress.error =
+      typeof errorMessage === "string"
+        ? errorMessage
+        : `Agent stopped: ${String(stopReason)}`;
+  } else {
+    // A successful turn after a failed one means Pi's retry worked.
+    result.progress.error = undefined;
   }
   const text = contentText(event.message.content);
   if (text) {
@@ -597,6 +611,20 @@ interface RunContext {
   enqueueDialog: <T>(task: () => Promise<T>) => Promise<T>;
 }
 
+/**
+ * A run that reached agent_settled keeps its answer when Pi then had to be
+ * stopped: the session is complete, because Pi writes each entry at once.
+ */
+export function finalStatus(
+  exitCode: number,
+  settled: boolean,
+  forcedStop: boolean,
+  error: string | undefined,
+): "completed" | "failed" {
+  const exitedCleanly = exitCode === 0 || (settled && forcedStop);
+  return exitedCleanly && !error ? "completed" : "failed";
+}
+
 async function runAgent(
   plan: RunPlan,
   run: SubagentRun,
@@ -624,6 +652,7 @@ async function runAgent(
     target.kind === "resume" ? countMessageEntries(target.path) : 0;
   const startedAt = Date.now();
 
+  let runSettled = false;
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-subagent-"));
   const promptPath = join(temporaryDirectory, `${agent.name}.md`);
   try {
@@ -659,8 +688,12 @@ async function runAgent(
     run.child = child;
 
     let settle = () => {};
+    let settledRun = false;
     const settled = new Promise<void>((resolve) => {
-      settle = resolve;
+      settle = () => {
+        settledRun = true;
+        resolve();
+      };
     });
     child.onRecord((record) => {
       if (record.type === "agent_settled") {
@@ -716,9 +749,18 @@ async function runAgent(
     result.sessionFile =
       target.kind === "resume" ? target.path : findSession(target.id);
     result.messageEnd = countMessageEntries(result.sessionFile);
-    if (result.exitCode !== 0 && !result.progress.error && child.stderr()) {
+    const forced = child.forcedStop;
+    if (forced && settledRun) {
+      const detail = child.stderr() ? `: ${child.stderr()}` : "";
+      result.progress.warning = `Pi did not exit after the run and was stopped with ${forced}${detail}`;
+    } else if (
+      result.exitCode !== 0 &&
+      !result.progress.error &&
+      child.stderr()
+    ) {
       result.progress.error = child.stderr();
     }
+    runSettled = settledRun;
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
@@ -729,8 +771,12 @@ async function runAgent(
   }
 
   result.progress.durationMs = Date.now() - startedAt;
-  result.progress.status =
-    result.exitCode === 0 && !result.progress.error ? "completed" : "failed";
+  result.progress.status = finalStatus(
+    result.exitCode,
+    runSettled,
+    result.progress.warning !== undefined,
+    result.progress.error,
+  );
   if (!result.output && result.progress.error) {
     result.output = `Error: ${result.progress.error}`;
   }
@@ -874,6 +920,15 @@ function addFooter(
   if (result.progress.error) {
     container.addChild(
       new Text(theme.fg("error", `Error: ${result.progress.error}`), 0, 0),
+    );
+  }
+  if (result.progress.warning) {
+    container.addChild(
+      new Text(
+        theme.fg("warning", `Warning: ${result.progress.warning}`),
+        0,
+        0,
+      ),
     );
   }
   if (showSession && result.sessionFile) {

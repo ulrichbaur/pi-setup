@@ -126,3 +126,16 @@ test("the exit signal aborts when the child exits", async () => {
   await child.close();
   assert.equal(exitSignal.aborted, true);
 });
+
+test("close reports the signal it had to send", async () => {
+  // Each child answers a command first, so it is running when close starts.
+  const child = startFake("linger");
+  await child.send({ type: "prompt", message: "Task: test" });
+  assert.equal(await child.close(100), 1);
+  assert.equal(child.forcedStop, "SIGTERM");
+
+  const polite = startFake("complete");
+  await polite.send({ type: "prompt", message: "Task: test" });
+  assert.equal(await polite.close(5_000), 0);
+  assert.equal(polite.forcedStop, undefined);
+});

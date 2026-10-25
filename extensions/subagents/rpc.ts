@@ -70,6 +70,7 @@ export class RpcChild {
   >();
   private nextId = 0;
   private stderrText = "";
+  private forcedSignal: NodeJS.Signals | undefined;
   private hasExited = false;
 
   constructor(
@@ -148,14 +149,23 @@ export class RpcChild {
    */
   async close(graceMs = 3_000): Promise<number> {
     this.child.stdin.end();
-    const terminate = setTimeout(() => this.child.kill("SIGTERM"), graceMs);
-    const kill = setTimeout(() => this.child.kill("SIGKILL"), graceMs * 2);
+    const force = (signal: NodeJS.Signals) => {
+      this.forcedSignal = signal;
+      this.child.kill(signal);
+    };
+    const terminate = setTimeout(() => force("SIGTERM"), graceMs);
+    const kill = setTimeout(() => force("SIGKILL"), graceMs * 2);
     try {
       return await this.exited;
     } finally {
       clearTimeout(terminate);
       clearTimeout(kill);
     }
+  }
+
+  /** The last signal close() had to send, if the child did not exit itself. */
+  get forcedStop(): NodeJS.Signals | undefined {
+    return this.forcedSignal;
   }
 
   stderr(): string {

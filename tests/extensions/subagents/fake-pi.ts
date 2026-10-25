@@ -1,6 +1,7 @@
 // A stand-in for `pi --mode rpc`. The first argument selects the behavior:
-// "complete" finishes each prompt, "crash" exits during a prompt, and
-// "hang" waits until it receives an abort command.
+// "complete" finishes each prompt, "crash" exits during a prompt,
+// "hang" waits until it receives an abort command, and "linger" keeps
+// running after stdin closes. Any other value behaves like "complete".
 import { createLineSplitter } from "../../../extensions/subagents/rpc.ts";
 
 const mode = process.argv[2] ?? "complete";
@@ -48,6 +49,10 @@ const splitter = createLineSplitter((line) => {
 
 process.stdin.on("data", (chunk: Buffer) => splitter.write(chunk));
 process.stdin.on("end", () => {
+  if (mode === "linger") {
+    setInterval(() => {}, 1_000);
+    return;
+  }
   splitter.end();
   process.stderr.write(`commands: ${seen.join(",")}\n`);
   process.exit(0);
