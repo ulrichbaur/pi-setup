@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,6 +16,7 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { isRecord } from "../../lib/is-record.ts";
+import { RpcChild, type RpcRecord } from "./rpc.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = join(EXTENSION_DIR, "..", "..");
@@ -30,7 +30,6 @@ const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
   web_fetch: join(EXTENSION_DIR, "..", "web-fetch", "index.ts"),
   web_search: join(EXTENSION_DIR, "..", "web-search", "index.ts"),
 };
-const TASK_ARGUMENT_LIMIT = 8_000;
 
 interface AgentModelConfig {
   models: string[];
@@ -332,14 +331,8 @@ function addUsage(target: UsageStats, value: unknown): void {
   }
 }
 
-function applyEvent(result: AgentResult, line: string): void {
-  let event: JsonEvent;
-  try {
-    event = JSON.parse(line) as JsonEvent;
-  } catch {
-    return;
-  }
-
+function applyEvent(result: AgentResult, record: RpcRecord): void {
+  const event = record as JsonEvent;
   if (event.type === "tool_execution_start") {
     result.progress.toolCount += 1;
     result.progress.currentTool =
@@ -399,32 +392,23 @@ export function selectSubagentModel(
   return preferences.find((model) => availableModels.has(model)) ?? parentModel;
 }
 
-async function buildArguments(
-  agent: AgentDefinition,
-  task: string,
+export function subagentArguments(
+  tools: string[],
+  systemPromptPath: string,
   selectedModel: string | undefined,
-  inheritThinkingLevel: boolean,
   thinkingLevel: string | undefined,
-): Promise<{ args: string[]; temporaryDirectory: string }> {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-subagent-"));
-  const promptPath = join(temporaryDirectory, `${agent.name}.md`);
-  await writeFile(promptPath, agent.systemPrompt, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-
+): string[] {
   const args = [
     "--mode",
-    "json",
-    "-p",
+    "rpc",
     "--no-session",
     "--no-skills",
     "--no-extensions",
   ];
-  args.push(...subagentToolSelectionArgs(agent.tools));
+  args.push(...subagentToolSelectionArgs(tools));
 
   const extensionPaths = new Set(
-    agent.tools
+    tools
       .map((tool) => CUSTOM_TOOL_EXTENSIONS[tool])
       .filter((extension): extension is string => Boolean(extension)),
   );
@@ -433,22 +417,11 @@ async function buildArguments(
   }
 
   if (selectedModel) args.push("--model", selectedModel);
-  if (inheritThinkingLevel && thinkingLevel && thinkingLevel !== "off") {
+  if (thinkingLevel && thinkingLevel !== "off") {
     args.push("--thinking", thinkingLevel);
   }
-  args.push("--append-system-prompt", promptPath);
-
-  if (task.length <= TASK_ARGUMENT_LIMIT) {
-    args.push(`Task: ${task}`);
-  } else {
-    const taskPath = join(temporaryDirectory, "task.md");
-    await writeFile(taskPath, `Task: ${task}`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    args.push(`@${taskPath}`);
-  }
-  return { args, temporaryDirectory };
+  args.push("--append-system-prompt", systemPromptPath);
+  return args;
 }
 
 async function runAgent(
@@ -472,72 +445,75 @@ async function runAgent(
   result.model = selectedModel;
   result.progress.status = "running";
   const startedAt = Date.now();
-  const { args, temporaryDirectory } = await buildArguments(
-    agent,
-    task,
-    selectedModel,
-    inheritThinkingLevel,
-    thinkingLevel,
-  );
-  const invocation = resolvePiInvocation(args);
 
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-subagent-"));
+  const promptPath = join(temporaryDirectory, `${agent.name}.md`);
   try {
-    result.exitCode = await new Promise<number>((resolve) => {
-      const child = spawn(invocation.command, invocation.args, {
-        cwd,
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      let killTimer: NodeJS.Timeout | undefined;
-
-      const update = () => {
-        result.progress.durationMs = Date.now() - startedAt;
-        onUpdate?.(result);
-      };
-      const processLine = (line: string) => {
-        if (!line.trim()) return;
-        applyEvent(result, line);
-        update();
-      };
-      child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
-        const lines = stdout.split("\n");
-        stdout = lines.pop() ?? "";
-        for (const line of lines) processLine(line);
-      });
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
-
-      const abort = () => {
-        child.kill("SIGTERM");
-        killTimer = setTimeout(() => {
-          if (child.exitCode === null) child.kill("SIGKILL");
-        }, 3_000);
-        killTimer.unref();
-      };
-      if (signal?.aborted) abort();
-      else signal?.addEventListener("abort", abort, { once: true });
-
-      child.on("error", (error) => {
-        result.progress.error = error.message;
-      });
-      child.on("close", (code) => {
-        if (stdout.trim()) processLine(stdout);
-        if (code !== 0 && stderr.trim() && !result.progress.error) {
-          result.progress.error = stderr.trim();
-        }
-        if (signal?.aborted) result.progress.error = "Subagent was aborted";
-        if (killTimer) clearTimeout(killTimer);
-        signal?.removeEventListener("abort", abort);
-        resolve(code ?? 1);
-      });
+    await writeFile(promptPath, agent.systemPrompt, {
+      encoding: "utf8",
+      mode: 0o600,
     });
+    const invocation = resolvePiInvocation(
+      subagentArguments(
+        agent.tools,
+        promptPath,
+        selectedModel,
+        inheritThinkingLevel ? thinkingLevel : undefined,
+      ),
+    );
+    const child = new RpcChild(invocation.command, invocation.args, cwd);
+
+    let settle = () => {};
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    child.onRecord((record) => {
+      if (record.type === "agent_settled") {
+        settle();
+        return;
+      }
+      applyEvent(result, record);
+      result.progress.durationMs = Date.now() - startedAt;
+      onUpdate?.(result);
+    });
+
+    const abort = () => void child.abort();
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    try {
+      const data = await child.send({
+        type: "prompt",
+        message: `Task: ${task}`,
+      });
+      const disposition = isRecord(data) ? data.disposition : undefined;
+      if (disposition !== "started") {
+        throw new Error(
+          `Subagent did not start a run (${String(disposition)})`,
+        );
+      }
+      const finished = await Promise.race([
+        settled.then(() => true),
+        child.exited.then(() => false),
+      ]);
+      if (!finished) {
+        throw new Error(
+          `Subagent exited before finishing${child.stderr() ? `: ${child.stderr()}` : ""}`,
+        );
+      }
+    } catch (error) {
+      result.progress.error ??=
+        error instanceof Error ? error.message : String(error);
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      result.exitCode = await child.close();
+    }
+    if (result.exitCode !== 0 && !result.progress.error && child.stderr()) {
+      result.progress.error = child.stderr();
+    }
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
+  if (signal?.aborted) result.progress.error = "Subagent was aborted";
 
   result.progress.durationMs = Date.now() - startedAt;
   result.progress.status =

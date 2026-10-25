@@ -8,6 +8,7 @@ import {
   DEFAULT_CONFIG,
   parseSubagentConfig,
   selectSubagentModel,
+  subagentArguments,
   subagentToolSelectionArgs,
 } from "../../../extensions/subagents/index.ts";
 
@@ -146,4 +147,35 @@ test("selects custom tools for child Pi processes", () => {
     ["--tools", "read,web_search,web_fetch"],
   );
   assert.deepEqual(subagentToolSelectionArgs([]), ["--no-tools"]);
+});
+
+test("child Pi processes run in RPC mode with the agent's settings", () => {
+  const args = subagentArguments(
+    ["read", "web_search"],
+    "/tmp/scout.md",
+    "openai/gpt-5",
+    "high",
+  );
+  assert.deepEqual(args.slice(0, 5), [
+    "--mode",
+    "rpc",
+    "--no-session",
+    "--no-skills",
+    "--no-extensions",
+  ]);
+  assert.ok(!args.includes("-p"));
+  assert.deepEqual(args.slice(-6), [
+    "--model",
+    "openai/gpt-5",
+    "--thinking",
+    "high",
+    "--append-system-prompt",
+    "/tmp/scout.md",
+  ]);
+  assert.ok(args.some((arg) => arg.endsWith(join("web-search", "index.ts"))));
+  assert.ok(
+    !subagentArguments([], "/tmp/x.md", undefined, "off").includes(
+      "--thinking",
+    ),
+  );
 });
