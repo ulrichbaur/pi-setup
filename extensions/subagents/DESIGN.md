@@ -92,6 +92,9 @@
 
 ## Background
 
+- `maxConcurrency` limits all runs of the session at once,
+  across tool calls and background runs, first come, first served.
+  A waiting run shows as pending, and stopping it leaves the queue.
 - With `background: true`, the tool returns at once with the session ids.
   The runs outlive the tool call, so its abort signal does not stop them;
   `/agents` and session shutdown do.

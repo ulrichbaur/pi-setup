@@ -198,7 +198,8 @@ a note with the subagent's newest answer.
 
 The optional config lives in `~/.pi/agent/subagents.json` (or below
 `PI_CODING_AGENT_DIR` when set) and overrides the built-in defaults:
-concurrency 4, at most 8 parallel tasks, sessions kept for 90 days,
+at most 4 subagents running at once across the session,
+at most 8 parallel tasks in one call, sessions kept for 90 days,
 background questions cancelled after 10 minutes, and no model preferences.
 Older sessions are deleted when Pi starts.
 Each agent may set a `models` array of `provider/model` IDs.

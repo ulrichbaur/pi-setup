@@ -1,10 +1,11 @@
-// A stand-in for `pi --mode rpc`. The first argument selects the behavior:
+// A stand-in for `pi --mode rpc`. FAKE_PI_MODE, or else the first argument,
+// selects the behavior:
 // "complete" finishes each prompt, "crash" exits during a prompt,
 // "hang" waits until it receives an abort command, and "linger" keeps
 // running after stdin closes. Any other value behaves like "complete".
 import { createLineSplitter } from "../../../extensions/subagents/rpc.ts";
 
-const mode = process.argv[2] ?? "complete";
+const mode = process.env.FAKE_PI_MODE ?? process.argv[2] ?? "complete";
 const seen: string[] = [];
 const send = (value: unknown) =>
   process.stdout.write(`${JSON.stringify(value)}\n`);

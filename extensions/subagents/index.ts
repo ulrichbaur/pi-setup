@@ -23,6 +23,7 @@ import {
   forwardNotification,
   type ParentUI,
 } from "./dialogs.ts";
+import { Limiter } from "./limiter.ts";
 import { openSubagentSession, returnToParent } from "./navigation.ts";
 import { type DialogHandler, RpcChild, type RpcRecord } from "./rpc.ts";
 import { RunRegistry, type SubagentRun } from "./runs.ts";
@@ -822,26 +823,6 @@ async function runAgent(
   return result;
 }
 
-async function mapConcurrent<T, R>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const worker = async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await fn(items[index], index);
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, worker),
-  );
-  return results;
-}
-
 function formatTokens(value: number): string {
   return value < 1_000 ? String(value) : `${(value / 1_000).toFixed(1)}k`;
 }
@@ -1083,25 +1064,39 @@ const TaskSchema = Type.Object({
 async function runAll(
   plans: RunPlan[],
   runs: SubagentRun[],
-  maxConcurrency: number,
+  limiter: Limiter,
   context: RunContext,
   update: () => void,
 ): Promise<AgentResult[]> {
-  return mapConcurrent(plans, maxConcurrency, async (plan, index) => {
-    const run = runs[index];
-    try {
-      await runAgent(plan, run, context, update);
-    } catch (error) {
-      run.child = undefined;
-      run.result.live = undefined;
-      run.result.progress.status = "failed";
-      run.result.progress.error =
-        error instanceof Error ? error.message : String(error);
-      run.result.output ||= `Error: ${run.result.progress.error}`;
-    }
-    update();
-    return run.result;
-  });
+  return Promise.all(
+    plans.map(async (plan, index) => {
+      const run = runs[index];
+      const waitSignal = context.signal
+        ? AbortSignal.any([context.signal, run.stop.signal])
+        : run.stop.signal;
+      try {
+        await limiter.run(
+          () => runAgent(plan, run, context, update),
+          waitSignal,
+        );
+      } catch (error) {
+        run.child = undefined;
+        run.result.live = undefined;
+        run.result.progress.status = "failed";
+        run.result.progress.error =
+          run.stop.signal.aborted && !context.signal?.aborted
+            ? "Stopped by the user"
+            : context.signal?.aborted
+              ? "Subagent was aborted"
+              : error instanceof Error
+                ? error.message
+                : String(error);
+        run.result.output ||= `Error: ${run.result.progress.error}`;
+      }
+      update();
+      return run.result;
+    }),
+  );
 }
 
 function extensionTool(
@@ -1110,6 +1105,8 @@ function extensionTool(
   registry: RunRegistry,
   delivery: Delivery,
 ) {
+  // One limit for every run of this session, background runs included.
+  const limiter = new Limiter(config.maxConcurrency);
   // Dialogs from all subagents share one queue, so only one is open at a time.
   const enqueueDialog = createDialogQueue();
   return {
@@ -1263,7 +1260,7 @@ function extensionTool(
         void runAll(
           plans,
           runs,
-          config.maxConcurrency,
+          limiter,
           { ...context, signal: undefined },
           () => registry.changed(),
         ).then((results) => delivery.deliver(token, { mode, results }));
@@ -1280,13 +1277,7 @@ function extensionTool(
         };
       }
 
-      const results = await runAll(
-        plans,
-        runs,
-        config.maxConcurrency,
-        context,
-        update,
-      );
+      const results = await runAll(plans, runs, limiter, context, update);
       const details: SubagentDetails = { mode, results };
       return {
         content: [{ type: "text" as const, text: combinedText(details) }],
