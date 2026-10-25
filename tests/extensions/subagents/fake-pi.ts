@@ -1,11 +1,28 @@
-// A stand-in for `pi --mode rpc`. FAKE_PI_MODE, or else the first argument,
-// selects the behavior:
+// A stand-in for `pi --mode rpc`. The mode selects the behavior:
 // "complete" finishes each prompt, "crash" exits during a prompt,
 // "hang" waits until it receives an abort command, and "linger" keeps
-// running after stdin closes. Any other value behaves like "complete".
+// running after stdin closes.
 import { createLineSplitter } from "../../../extensions/subagents/rpc.ts";
 
-const mode = process.env.FAKE_PI_MODE ?? process.argv[2] ?? "complete";
+const MODES = ["complete", "crash", "hang", "linger"];
+
+// Tests that start the fake pass the mode as the first argument. The
+// extension starts it like Pi, with Pi's arguments; then FAKE_PI_MODE
+// chooses the mode, and the arguments must ask for RPC mode.
+function selectMode(args: string[]): string {
+  if (args[0]?.startsWith("--")) {
+    const rpc = args.findIndex(
+      (arg, i) => arg === "--mode" && args[i + 1] === "rpc",
+    );
+    if (rpc === -1)
+      throw new Error(`fake-pi: not started in RPC mode: ${args.join(" ")}`);
+    return process.env.FAKE_PI_MODE ?? "complete";
+  }
+  return args[0] ?? "complete";
+}
+
+const mode = selectMode(process.argv.slice(2));
+if (!MODES.includes(mode)) throw new Error(`fake-pi: unknown mode ${mode}`);
 const seen: string[] = [];
 const send = (value: unknown) =>
   process.stdout.write(`${JSON.stringify(value)}\n`);

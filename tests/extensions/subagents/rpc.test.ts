@@ -139,3 +139,9 @@ test("close reports the signal it had to send", async () => {
   assert.equal(await polite.close(5_000), 0);
   assert.equal(polite.forcedStop, undefined);
 });
+
+test("the fake child refuses an unknown mode instead of guessing", async () => {
+  const child = startFake("compelte");
+  assert.notEqual(await child.exited, 0);
+  assert.match(child.stderr(), /fake-pi: unknown mode compelte/);
+});
