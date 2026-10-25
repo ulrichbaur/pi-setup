@@ -31,10 +31,10 @@ import { RunRegistry, type SubagentRun } from "./runs.ts";
 import {
   AGENT_NAME_PATTERN,
   findSession,
+  listSavedSessions,
   newSessionId,
   pruneSessions,
   readSessionCwd,
-  recentSessionIds,
   SESSIONS_DIR,
   type SessionTarget,
   sessionAgent,
@@ -142,6 +142,8 @@ export interface SubagentDetails {
   // The results are placeholders; the real ones arrive as a message.
   background?: boolean;
 }
+
+const SAVED_SESSION_LIMIT = 200;
 
 // The custom message that carries a background run's results.
 export const RESULT_MESSAGE_TYPE = "subagent-result";
@@ -1412,9 +1414,13 @@ export default function subagents(
     getArgumentCompletions: (prefix) => {
       if (prefix.startsWith("open ")) {
         const typed = prefix.slice("open ".length);
-        return recentSessionIds(20)
-          .filter((id) => id.startsWith(typed))
-          .map((id) => ({ value: `open ${id}`, label: id }));
+        return listSavedSessions(SAVED_SESSION_LIMIT)
+          .filter((session) => session.id.startsWith(typed))
+          .map((session) => ({
+            value: `open ${session.id}`,
+            label: session.id,
+            description: session.name,
+          }));
       }
       return [
         {
@@ -1452,7 +1458,10 @@ export default function subagents(
       }
       const choice = await ctx.ui.custom<OverlayChoice>(
         (tui, theme, _keybindings, done) =>
-          new AgentsOverlay(tui, theme, registry, done, hideThinking),
+          new AgentsOverlay(tui, theme, registry, done, {
+            hideThinking,
+            savedSessions: () => listSavedSessions(SAVED_SESSION_LIMIT),
+          }),
         {
           overlay: true,
           overlayOptions: {

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import {
   AgentsOverlay,
@@ -12,7 +14,11 @@ import {
   RunRegistry,
   type SubagentRun,
 } from "../../../extensions/subagents/runs.ts";
+import type { SavedSession } from "../../../extensions/subagents/sessions.ts";
+import { withTempDir } from "../../helpers.ts";
 import { fakeRun } from "./fake-run.ts";
+
+initTheme("dark");
 
 const KEYS = {
   up: "\x1b[A",
@@ -22,12 +28,15 @@ const KEYS = {
   escape: "\x1b",
   stop: "\x18",
   open: "\x0f",
+  tab: "\t",
 };
 
 const theme = {
   fg: (_color: string, text: string) => text,
   bold: (text: string) => text,
 } as unknown as Theme;
+
+let saved: SavedSession[] = [];
 
 function setup() {
   const registry = new RunRegistry();
@@ -49,7 +58,7 @@ function setup() {
       closed = true;
       choice = chosen;
     },
-    () => false,
+    { hideThinking: () => false, savedSessions: () => saved },
   );
   overlay.focused = true;
   const type = (text: string) => {
@@ -237,4 +246,52 @@ test("a waiting question is marked and answered in the overlay", async () => {
   assert.deepEqual(await input, { value: "main" });
   assert.match(screen(), /Answered\./);
   assert.match(screen(), /Enter steer/);
+});
+
+test("Tab lists saved sessions to view and open", async () => {
+  await withTempDir("subagent-saved-", (directory) => {
+    const path = join(directory, "a.jsonl");
+    const message = (role: string, text: string) =>
+      JSON.stringify({
+        type: "message",
+        message: { role, content: [{ type: "text", text }] },
+      });
+    writeFileSync(
+      path,
+      `${[message("user", "Task: map the parser"), message("assistant", "Parser mapped.")].join("\n")}\n`,
+    );
+    const now = Date.now();
+    saved = [
+      {
+        id: "scout-0000000a",
+        path,
+        name: "scout: map the parser",
+        cwd: "/repo/app",
+        modifiedMs: now - 5 * 60_000,
+      },
+      {
+        id: "worker-0000000b",
+        path,
+        name: "worker: fix it",
+        cwd: "",
+        modifiedMs: now - 3 * 86_400_000,
+      },
+    ];
+    const { overlay, screen, isClosed, choice } = setup();
+    overlay.handleInput(KEYS.tab);
+    assert.match(screen(), /Saved subagent sessions \(2\)/);
+    assert.match(screen(), /› scout: map the parser/);
+    assert.match(screen(), /scout-0000000a · 5m ago · app/);
+    assert.match(screen(), /worker-0000000b · 3d ago\n/);
+
+    overlay.handleInput(KEYS.enter);
+    assert.match(screen(), /Parser mapped\./);
+    assert.match(screen(), /Read-only/);
+    overlay.handleInput(KEYS.escape);
+    overlay.handleInput(KEYS.down);
+    overlay.handleInput(KEYS.open);
+    assert.equal(isClosed(), true);
+    assert.deepEqual(choice(), { open: "worker-0000000b" });
+    saved = [];
+  });
 });

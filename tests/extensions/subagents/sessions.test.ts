@@ -3,6 +3,7 @@ import { existsSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  listSavedSessions,
   newSessionId,
   pruneSessions,
   sessionAgent,
@@ -77,4 +78,37 @@ test("cleanup deletes only session files past the retention period", async () =>
     assert.equal(existsSync(other), true);
   });
   assert.equal(await pruneSessions(90, "/nonexistent/subagent-sessions"), 0);
+});
+
+test("saved sessions list their names, newest change first", async () => {
+  await withTempDir("subagent-list-", (directory) => {
+    const file = (name: string, lines: unknown[], ageMs: number) => {
+      const path = join(directory, name);
+      writeFileSync(path, lines.map((line) => JSON.stringify(line)).join("\n"));
+      const time = new Date(Date.now() - ageMs);
+      utimesSync(path, time, time);
+      return path;
+    };
+    file(
+      "2026-10-01T00-00-00-000Z_scout-0000000a.jsonl",
+      [
+        { type: "session", cwd: "/repo" },
+        { type: "session_info", name: "scout: map it" },
+      ],
+      60_000,
+    );
+    file("2026-10-02T00-00-00-000Z_worker-0000000b.jsonl", ["broken"], 1_000);
+    writeFileSync(join(directory, "notes.txt"), "ignored");
+
+    const sessions = listSavedSessions(10, directory);
+    assert.deepEqual(
+      sessions.map(({ id, name, cwd }) => [id, name, cwd]),
+      [
+        ["worker-0000000b", "worker-0000000b", ""],
+        ["scout-0000000a", "scout: map it", "/repo"],
+      ],
+    );
+    assert.equal(listSavedSessions(1, directory).length, 1);
+  });
+  assert.deepEqual(listSavedSessions(10, "/nonexistent/subagent-sessions"), []);
 });

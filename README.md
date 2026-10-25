@@ -188,6 +188,7 @@ Its questions and approvals wait in `/agents`, and you get a notice.
 An unanswered one is cancelled after 10 minutes:
 `safe_bash` then blocks the command, and `ask_user` reports no answer.
 `/agents` lists this session's subagent runs, even while one runs.
+Press Tab there to browse saved subagent sessions from earlier work.
 Open a running subagent to follow it, send it a message
 (Enter steers, Alt+Enter queues a follow-up), or stop it with Ctrl+X.
 The parent model sees the messages you sent.

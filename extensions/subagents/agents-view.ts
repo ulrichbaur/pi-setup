@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { DynamicBorder, type Theme } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
@@ -17,7 +18,9 @@ import type {
   RunRegistry,
   SubagentRun,
 } from "./runs.ts";
-import { transcriptView } from "./transcript-view.ts";
+import type { SavedSession } from "./sessions.ts";
+import { loadTranscript } from "./transcript.ts";
+import { renderTranscript, transcriptView } from "./transcript-view.ts";
 
 const OVERLAY_HEIGHT_FRACTION = 0.85;
 
@@ -29,6 +32,19 @@ function formatDuration(milliseconds: number): string {
 }
 
 export type OverlayChoice = { open: string } | undefined;
+
+export interface OverlayOptions {
+  hideThinking: () => boolean;
+  savedSessions: () => SavedSession[];
+}
+
+function formatAgo(milliseconds: number): string {
+  const minutes = Math.floor(milliseconds / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+}
 
 // An item value no select option can have.
 const DISMISS = "\u0000dismiss";
@@ -48,8 +64,10 @@ function isActive(run: SubagentRun): boolean {
 }
 
 export class AgentsOverlay implements Component, Focusable {
-  private view: "list" | "detail" = "list";
+  private view: "list" | "detail" | "saved" | "savedDetail" = "list";
   private selected: SubagentRun | undefined;
+  private saved: SavedSession[] = [];
+  private selectedSaved: SavedSession | undefined;
   // 0 follows new output.
   private scrollFromEnd = 0;
   private viewportHeight = 1;
@@ -66,20 +84,20 @@ export class AgentsOverlay implements Component, Focusable {
   private readonly theme: Theme;
   private readonly registry: RunRegistry;
   private readonly done: (choice: OverlayChoice) => void;
-  private readonly hideThinking: () => boolean;
+  private readonly options: OverlayOptions;
 
   constructor(
     tui: TUI,
     theme: Theme,
     registry: RunRegistry,
     done: (choice: OverlayChoice) => void,
-    hideThinking: () => boolean,
+    options: OverlayOptions,
   ) {
     this.tui = tui;
     this.theme = theme;
     this.registry = registry;
     this.done = done;
-    this.hideThinking = hideThinking;
+    this.options = options;
     this.border = new DynamicBorder((text: string) => theme.fg("accent", text));
     this.separator = new DynamicBorder((text: string) =>
       theme.fg("borderMuted", text),
@@ -111,7 +129,9 @@ export class AgentsOverlay implements Component, Focusable {
 
   handleInput(data: string): void {
     if (this.view === "list") this.handleListInput(data);
-    else this.handleDetailInput(data);
+    else if (this.view === "detail") this.handleDetailInput(data);
+    else if (this.view === "saved") this.handleSavedInput(data);
+    else this.handleSavedDetailInput(data);
     this.tui.requestRender();
   }
 
@@ -120,10 +140,16 @@ export class AgentsOverlay implements Component, Focusable {
       6,
       Math.floor(this.tui.terminal.rows * OVERLAY_HEIGHT_FRACTION),
     );
-    const lines =
-      this.view === "detail" && this.selected
-        ? this.renderDetail(this.selected, width, maxHeight)
-        : this.renderList(width, maxHeight);
+    let lines: string[];
+    if (this.view === "detail" && this.selected) {
+      lines = this.renderDetail(this.selected, width, maxHeight);
+    } else if (this.view === "saved") {
+      lines = this.renderSaved(width, maxHeight);
+    } else if (this.view === "savedDetail" && this.selectedSaved) {
+      lines = this.renderSavedDetail(this.selectedSaved, width, maxHeight);
+    } else {
+      lines = this.renderList(width, maxHeight);
+    }
     return lines.map((line) => truncateToWidth(line, width, ""));
   }
 
@@ -169,6 +195,65 @@ export class AgentsOverlay implements Component, Focusable {
       this.stop(this.selected);
     } else if (matchesKey(data, Key.ctrl("o")) && this.selected) {
       this.openSession(this.selected);
+    } else if (matchesKey(data, Key.tab)) {
+      this.showSaved();
+    }
+  }
+
+  private showSaved(): void {
+    this.saved = this.options.savedSessions();
+    if (!this.selectedSaved || !this.saved.includes(this.selectedSaved)) {
+      this.selectedSaved = this.saved.find(
+        (session) => session.id === this.selectedSaved?.id,
+      );
+      this.selectedSaved ??= this.saved[0];
+    }
+    this.view = "saved";
+  }
+
+  private handleSavedInput(data: string): void {
+    const index = this.selectedSaved
+      ? this.saved.indexOf(this.selectedSaved)
+      : -1;
+    if (
+      matchesKey(data, Key.escape) ||
+      matchesKey(data, Key.ctrl("c")) ||
+      data === "q"
+    ) {
+      this.close();
+    } else if (matchesKey(data, Key.tab)) {
+      this.view = "list";
+    } else if (matchesKey(data, Key.up)) {
+      this.selectedSaved = this.saved[Math.max(0, index - 1)];
+    } else if (matchesKey(data, Key.down)) {
+      this.selectedSaved =
+        this.saved[Math.min(this.saved.length - 1, index + 1)];
+    } else if (matchesKey(data, Key.enter) && this.selectedSaved) {
+      this.view = "savedDetail";
+      this.scrollFromEnd = 0;
+    } else if (matchesKey(data, Key.ctrl("o")) && this.selectedSaved) {
+      this.close({ open: this.selectedSaved.id });
+    }
+  }
+
+  private handleSavedDetailInput(data: string): void {
+    if (matchesKey(data, Key.escape)) {
+      this.view = "saved";
+    } else if (matchesKey(data, Key.ctrl("o")) && this.selectedSaved) {
+      this.close({ open: this.selectedSaved.id });
+    } else {
+      this.scroll(data);
+    }
+  }
+
+  private scroll(data: string): void {
+    if (matchesKey(data, Key.pageUp)) {
+      this.scrollFromEnd += this.viewportHeight;
+    } else if (matchesKey(data, Key.pageDown)) {
+      this.scrollFromEnd = Math.max(
+        0,
+        this.scrollFromEnd - this.viewportHeight,
+      );
     }
   }
 
@@ -184,13 +269,8 @@ export class AgentsOverlay implements Component, Focusable {
       this.stop(run);
     } else if (matchesKey(data, Key.ctrl("o"))) {
       this.openSession(run);
-    } else if (matchesKey(data, Key.pageUp)) {
-      this.scrollFromEnd += this.viewportHeight;
-    } else if (matchesKey(data, Key.pageDown)) {
-      this.scrollFromEnd = Math.max(
-        0,
-        this.scrollFromEnd - this.viewportHeight,
-      );
+    } else if (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)) {
+      this.scroll(data);
     } else if (question && isChoice(question)) {
       this.questionList(question).handleInput(data);
     } else if (question) {
@@ -366,14 +446,114 @@ export class AgentsOverlay implements Component, Focusable {
     const footer = [
       this.theme.fg(
         "dim",
-        " ↑↓ select · Enter view · Ctrl+O open session · Ctrl+X stop · Esc close",
+        " ↑↓ select · Enter view · Ctrl+O open session · Ctrl+X stop · Tab saved · Esc close",
       ),
     ];
+    const selected = this.selected ? runs.indexOf(this.selected) : 0;
+    return this.listFrame(width, maxHeight, header, body, footer, selected, 2);
+  }
+
+  private listFrame(
+    width: number,
+    maxHeight: number,
+    header: string[],
+    body: string[],
+    footer: string[],
+    selectedIndex: number,
+    linesPerItem: number,
+  ): string[] {
     const height = this.measureViewport(width, maxHeight, header, footer);
-    const selectedLine = this.selected ? runs.indexOf(this.selected) * 2 : 0;
-    const firstVisibleLine = Math.max(0, selectedLine + 2 - height);
+    const firstVisibleLine = Math.max(
+      0,
+      (selectedIndex + 1) * linesPerItem - height,
+    );
     const visible = body.slice(firstVisibleLine, firstVisibleLine + height);
     return this.frame(width, header, visible, footer);
+  }
+
+  private scrolledFrame(
+    width: number,
+    maxHeight: number,
+    header: string[],
+    lines: string[],
+    footer: string[],
+  ): string[] {
+    this.viewportHeight = this.measureViewport(
+      width,
+      maxHeight,
+      header,
+      footer,
+    );
+    const maxScroll = Math.max(0, lines.length - this.viewportHeight);
+    this.scrollFromEnd = Math.min(this.scrollFromEnd, maxScroll);
+    const end = lines.length - this.scrollFromEnd;
+    const body = lines.slice(Math.max(0, end - this.viewportHeight), end);
+    return this.frame(width, header, body, footer);
+  }
+
+  private renderSaved(width: number, maxHeight: number): string[] {
+    const header = [
+      this.theme.fg(
+        "accent",
+        this.theme.bold(` Saved subagent sessions (${this.saved.length})`),
+      ),
+    ];
+    const now = Date.now();
+    const body =
+      this.saved.length === 0
+        ? [this.theme.fg("dim", " No saved subagent sessions.")]
+        : this.saved.flatMap((session) => {
+            const marker =
+              session === this.selectedSaved
+                ? this.theme.fg("accent", "›")
+                : " ";
+            const project = session.cwd ? ` · ${basename(session.cwd)}` : "";
+            return [
+              `${marker} ${this.theme.bold(session.name)}`,
+              `    ${this.theme.fg("dim", `${session.id} · ${formatAgo(now - session.modifiedMs)}${project}`)}`,
+            ];
+          });
+    const footer = [
+      this.theme.fg(
+        "dim",
+        " ↑↓ select · Enter view · Ctrl+O open session · Tab runs · Esc close",
+      ),
+    ];
+    const selected = this.selectedSaved
+      ? this.saved.indexOf(this.selectedSaved)
+      : 0;
+    return this.listFrame(width, maxHeight, header, body, footer, selected, 2);
+  }
+
+  private renderSavedDetail(
+    session: SavedSession,
+    width: number,
+    maxHeight: number,
+  ): string[] {
+    const header = [
+      ` ${this.theme.bold(session.name)} ${this.theme.fg("dim", session.id)}`,
+    ];
+    let lines: string[];
+    try {
+      lines = renderTranscript(
+        loadTranscript(session.path, 0, Number.POSITIVE_INFINITY),
+        {
+          cwd: session.cwd || process.cwd(),
+          invalidate: () => this.tui.requestRender(),
+          hideThinking: this.options.hideThinking(),
+        },
+      ).render(width);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      lines = [this.theme.fg("warning", ` Transcript unavailable: ${message}`)];
+    }
+    const footer = [
+      this.theme.fg(
+        "dim",
+        " Read-only · PgUp/PgDn scroll · Ctrl+O open session · Esc back",
+      ),
+    ];
+    return this.scrolledFrame(width, maxHeight, header, lines, footer);
   }
 
   private renderDetail(
@@ -386,7 +566,7 @@ export class AgentsOverlay implements Component, Focusable {
     try {
       const transcript = transcriptView(run.result, {
         invalidate: () => this.tui.requestRender(),
-        hideThinking: this.hideThinking(),
+        hideThinking: this.options.hideThinking(),
       });
       lines = transcript
         ? transcript.render(width)
@@ -458,16 +638,6 @@ export class AgentsOverlay implements Component, Focusable {
       );
     }
 
-    this.viewportHeight = this.measureViewport(
-      width,
-      maxHeight,
-      header,
-      footer,
-    );
-    const maxScroll = Math.max(0, lines.length - this.viewportHeight);
-    this.scrollFromEnd = Math.min(this.scrollFromEnd, maxScroll);
-    const end = lines.length - this.scrollFromEnd;
-    const body = lines.slice(Math.max(0, end - this.viewportHeight), end);
-    return this.frame(width, header, body, footer);
+    return this.scrolledFrame(width, maxHeight, header, lines, footer);
   }
 }
