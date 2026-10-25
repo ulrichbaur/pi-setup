@@ -177,6 +177,8 @@ Each run saves its session in `subagents/sessions/` below the agent directory,
 apart from your normal sessions.
 The tool result ends with `Session: <id>`.
 Pass that id as `session` with a follow-up `task` to continue the subagent with its earlier context.
+Expanding the tool result shows the subagent's whole conversation,
+live while it runs, with the same components as the main chat.
 To work in a subagent session yourself, open its file with `pi --session <path>`.
 The expanded tool result shows the path.
 

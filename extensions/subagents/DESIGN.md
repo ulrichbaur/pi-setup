@@ -45,6 +45,20 @@
   Without an answer, the tool tells the agent to continue
   and state its assumption.
 
+## Transcript
+
+- The collapsed result shows recent tools and the last message.
+- The expanded result shows the run's conversation
+  with the components of Pi's main chat.
+- While a run streams, the transcript is built from RPC events
+  and lives only in memory.
+- The saved result keeps the session file and the run's range of message
+  entries, not the messages.
+  Expanding it reads that range from the file.
+  A missing file shows a warning, and the result falls back to the final output.
+- When a run ends, tool rows still showing a partial result get a final one,
+  so their redraw timers stop.
+
 ## Sessions
 
 - Sessions live in `subagents/sessions` below Pi's agent directory.

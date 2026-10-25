@@ -36,6 +36,14 @@ import {
   sessionName,
 } from "./sessions.ts";
 import { ASK_FLAG } from "./tools/safe-bash.ts";
+import {
+  applyTranscriptEvent,
+  countMessageEntries,
+  emptyTranscript,
+  type LiveTranscript,
+  loadTranscript,
+} from "./transcript.ts";
+import { releaseTranscript, renderTranscript } from "./transcript-view.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = join(EXTENSION_DIR, "..", "..");
@@ -107,6 +115,12 @@ interface AgentResult {
   // when a run failed before Pi wrote it.
   sessionId?: string;
   sessionFile?: string;
+  cwd?: string;
+  // The run's messages in the session file, counted in message entries.
+  messageStart?: number;
+  messageEnd?: number;
+  // Present only while the run streams; the saved result reads the file.
+  live?: LiveTranscript;
 }
 
 interface SubagentDetails {
@@ -582,6 +596,10 @@ async function runAgent(
     selectedModel !== undefined && selectedModel === parentModel;
   result.model = selectedModel;
   result.progress.status = "running";
+  result.cwd = cwd;
+  result.live = emptyTranscript();
+  result.messageStart =
+    target.kind === "resume" ? countMessageEntries(target.path) : 0;
   const startedAt = Date.now();
 
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-subagent-"));
@@ -633,6 +651,7 @@ async function runAgent(
         forwardNotification(ui, record, target.id);
       }
       applyEvent(result, record);
+      if (result.live) applyTranscriptEvent(result.live, record);
       result.progress.durationMs = Date.now() - startedAt;
       onUpdate?.(result);
     });
@@ -669,6 +688,7 @@ async function runAgent(
     }
     result.sessionFile =
       target.kind === "resume" ? target.path : findSession(target.id);
+    result.messageEnd = countMessageEntries(result.sessionFile);
     if (result.exitCode !== 0 && !result.progress.error && child.stderr()) {
       result.progress.error = child.stderr();
     }
@@ -689,6 +709,10 @@ async function runAgent(
   });
   result.output = truncated.content;
   if (truncated.truncated) result.output += "\n\n[Subagent output truncated]";
+  if (result.live) {
+    releaseTranscript([...result.live.messages, result.live.streaming]);
+  }
+  result.live = undefined;
   onUpdate?.(result);
   return result;
 }
@@ -725,10 +749,39 @@ function formatDuration(milliseconds: number): string {
 
 type Theme = ExtensionContext["ui"]["theme"];
 
+/**
+ * The full conversation of one run: streamed while it runs, read from the
+ * session file afterwards. Undefined for results without a saved range.
+ */
+function transcriptView(
+  result: AgentResult,
+  invalidate: () => void,
+): Container | undefined {
+  const cwd = result.cwd ?? process.cwd();
+  if (result.live) {
+    return renderTranscript(result.live.messages, {
+      cwd,
+      streaming: result.live.streaming,
+      pendingResults: result.live.pendingResults,
+      invalidate,
+    });
+  }
+  if (!result.sessionFile || result.messageEnd === undefined) return undefined;
+  return renderTranscript(
+    loadTranscript(
+      result.sessionFile,
+      result.messageStart ?? 0,
+      result.messageEnd,
+    ),
+    { cwd, invalidate },
+  );
+}
+
 function renderAgent(
   result: AgentResult,
   expanded: boolean,
   theme: Theme,
+  invalidate: () => void,
 ): Container {
   const container = new Container();
   const icon =
@@ -750,6 +803,31 @@ function renderAgent(
   const task = expanded
     ? result.task
     : result.task.replace(/\s+/g, " ").slice(0, 160);
+
+  if (expanded) {
+    let transcript: Container | undefined;
+    let unavailable: string | undefined;
+    try {
+      transcript = transcriptView(result, invalidate);
+    } catch (error) {
+      unavailable = error instanceof Error ? error.message : String(error);
+    }
+    // The transcript starts with the task, so it needs no task line.
+    if (transcript) {
+      container.addChild(transcript);
+      addFooter(container, result, theme);
+      return container;
+    }
+    if (unavailable) {
+      container.addChild(
+        new Text(
+          theme.fg("warning", `Transcript unavailable: ${unavailable}`),
+          0,
+          0,
+        ),
+      );
+    }
+  }
   container.addChild(new Text(theme.fg("dim", `Task: ${task}`), 0, 0));
 
   const tools = expanded
@@ -780,17 +858,26 @@ function renderAgent(
       new Text(theme.fg("text", result.progress.lastMessage), 0, 0),
     );
   }
+  addFooter(container, result, theme, expanded);
+  return container;
+}
+
+function addFooter(
+  container: Container,
+  result: AgentResult,
+  theme: Theme,
+  showSession = true,
+): void {
   if (result.progress.error) {
     container.addChild(
       new Text(theme.fg("error", `Error: ${result.progress.error}`), 0, 0),
     );
   }
-  if (expanded && result.sessionFile) {
+  if (showSession && result.sessionFile) {
     container.addChild(
       new Text(theme.fg("dim", `Session: ${result.sessionFile}`), 0, 0),
     );
   }
-  return container;
 }
 
 /** The text the parent model receives for one subagent run. */
@@ -1022,6 +1109,7 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
       },
       options: { expanded: boolean },
       theme: Theme,
+      context: { invalidate: () => void },
     ) {
       const details = result.details as SubagentDetails | undefined;
       if (!details?.results.length) {
@@ -1045,7 +1133,9 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
         container.addChild(new Spacer(1));
       }
       details.results.forEach((item, index) => {
-        container.addChild(renderAgent(item, options.expanded, theme));
+        container.addChild(
+          renderAgent(item, options.expanded, theme, context.invalidate),
+        );
         if (index < details.results.length - 1) {
           container.addChild(new Spacer(1));
         }
