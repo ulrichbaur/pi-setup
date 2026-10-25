@@ -179,6 +179,10 @@ The tool result ends with `Session: <id>`.
 Pass that id as `session` with a follow-up `task` to continue the subagent with its earlier context.
 Expanding the tool result shows the subagent's whole conversation,
 live while it runs, with the same components as the main chat.
+`/agents` lists this session's subagent runs, even while one runs.
+Open a running subagent to follow it, send it a message
+(Enter steers, Alt+Enter queues a follow-up), or stop it with Ctrl+X.
+The parent model sees the messages you sent.
 To work in a subagent session yourself, open its file with `pi --session <path>`.
 The expanded tool result shows the path.
 

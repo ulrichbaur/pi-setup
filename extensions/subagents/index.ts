@@ -16,6 +16,7 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { isRecord } from "../../lib/is-record.ts";
+import { AgentsOverlay } from "./agents-view.ts";
 import {
   createDialogQueue,
   forwardDialog,
@@ -23,6 +24,7 @@ import {
   type ParentUI,
 } from "./dialogs.ts";
 import { RpcChild, type RpcRecord } from "./rpc.ts";
+import { RunRegistry, type SubagentRun } from "./runs.ts";
 import {
   AGENT_NAME_PATTERN,
   findSession,
@@ -41,9 +43,8 @@ import {
   countMessageEntries,
   emptyTranscript,
   type LiveTranscript,
-  loadTranscript,
 } from "./transcript.ts";
-import { releaseTranscript, renderTranscript } from "./transcript-view.ts";
+import { releaseTranscript, transcriptView } from "./transcript-view.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = join(EXTENSION_DIR, "..", "..");
@@ -103,7 +104,7 @@ interface AgentProgress {
   error?: string;
 }
 
-interface AgentResult {
+export interface AgentResult {
   agent: string;
   task: string;
   output: string;
@@ -121,6 +122,7 @@ interface AgentResult {
   messageEnd?: number;
   // Present only while the run streams; the saved result reads the file.
   live?: LiveTranscript;
+  userMessages?: string[];
 }
 
 interface SubagentDetails {
@@ -581,12 +583,16 @@ interface RunContext {
 
 async function runAgent(
   plan: RunPlan,
+  run: SubagentRun,
   context: RunContext,
   onUpdate?: (result: AgentResult) => void,
 ): Promise<AgentResult> {
   const { agent, task, cwd, target } = plan;
-  const { parentModel, availableModels, thinkingLevel, signal, ui } = context;
-  const result = pendingResult(agent.name, task, target.id);
+  const { parentModel, availableModels, thinkingLevel, ui } = context;
+  const { result } = run;
+  const signal = context.signal
+    ? AbortSignal.any([context.signal, run.stop.signal])
+    : run.stop.signal;
   const selectedModel = selectSubagentModel(
     agent.modelPreferences,
     availableModels,
@@ -630,9 +636,11 @@ async function runAgent(
             ui,
             request,
             target.id,
-            signal ? AbortSignal.any([signal, childExited]) : childExited,
+            AbortSignal.any([signal, childExited]),
           )),
     );
+
+    run.child = child;
 
     let settle = () => {};
     const settled = new Promise<void>((resolve) => {
@@ -640,6 +648,8 @@ async function runAgent(
     });
     child.onRecord((record) => {
       if (record.type === "agent_settled") {
+        // A message sent now would never run, so the child stops taking them.
+        run.child = undefined;
         settle();
         return;
       }
@@ -657,8 +667,8 @@ async function runAgent(
     });
 
     const abort = () => void child.abort();
-    if (signal?.aborted) abort();
-    else signal?.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
     try {
       const data = await child.send({
         type: "prompt",
@@ -683,7 +693,8 @@ async function runAgent(
       result.progress.error ??=
         error instanceof Error ? error.message : String(error);
     } finally {
-      signal?.removeEventListener("abort", abort);
+      signal.removeEventListener("abort", abort);
+      run.child = undefined;
       result.exitCode = await child.close();
     }
     result.sessionFile =
@@ -695,7 +706,11 @@ async function runAgent(
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
-  if (signal?.aborted) result.progress.error = "Subagent was aborted";
+  if (run.stop.signal.aborted && !context.signal?.aborted) {
+    result.progress.error = "Stopped by the user";
+  } else if (signal.aborted) {
+    result.progress.error = "Subagent was aborted";
+  }
 
   result.progress.durationMs = Date.now() - startedAt;
   result.progress.status =
@@ -748,34 +763,6 @@ function formatDuration(milliseconds: number): string {
 }
 
 type Theme = ExtensionContext["ui"]["theme"];
-
-/**
- * The full conversation of one run: streamed while it runs, read from the
- * session file afterwards. Undefined for results without a saved range.
- */
-function transcriptView(
-  result: AgentResult,
-  invalidate: () => void,
-): Container | undefined {
-  const cwd = result.cwd ?? process.cwd();
-  if (result.live) {
-    return renderTranscript(result.live.messages, {
-      cwd,
-      streaming: result.live.streaming,
-      pendingResults: result.live.pendingResults,
-      invalidate,
-    });
-  }
-  if (!result.sessionFile || result.messageEnd === undefined) return undefined;
-  return renderTranscript(
-    loadTranscript(
-      result.sessionFile,
-      result.messageStart ?? 0,
-      result.messageEnd,
-    ),
-    { cwd, invalidate },
-  );
-}
 
 function renderAgent(
   result: AgentResult,
@@ -881,11 +868,14 @@ function addFooter(
 }
 
 /** The text the parent model receives for one subagent run. */
-function resultText(result: AgentResult): string {
-  const output = result.output || "(no output)";
-  return result.sessionFile
-    ? `${output}\n\nSession: ${result.sessionId}`
-    : output;
+export function resultText(result: AgentResult): string {
+  let text = result.output || "(no output)";
+  if (result.userMessages?.length) {
+    const messages = result.userMessages.map((message) => `- ${message}`);
+    text += `\n\nThe user sent the subagent these messages while it ran:\n${messages.join("\n")}`;
+  }
+  if (result.sessionFile) text += `\n\nSession: ${result.sessionId}`;
+  return text;
 }
 
 const SESSION_DESCRIPTION =
@@ -904,9 +894,11 @@ const TaskSchema = Type.Object({
   session: Type.Optional(Type.String({ description: SESSION_DESCRIPTION })),
 });
 
-function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
-  // Ids of sessions with a live child; one session runs in one child.
-  const running = new Set<string>();
+function extensionTool(
+  config: SubagentConfig,
+  agents: AgentDefinition[],
+  registry: RunRegistry,
+) {
   // Dialogs from all subagents share one queue, so only one is open at a time.
   const enqueueDialog = createDialogQueue();
   return {
@@ -999,7 +991,7 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
       );
       const ids = plans.map((plan) => plan.target.id);
       ids.forEach((id, index) => {
-        if (running.has(id) || ids.indexOf(id) !== index) {
+        if (registry.active(id) || ids.indexOf(id) !== index) {
           throw new Error(`Subagent session ${id} is already running`);
         }
       });
@@ -1012,10 +1004,12 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
           .getAvailable()
           .map((model) => `${model.provider}/${model.id}`),
       );
-      const liveResults = plans.map((plan) =>
-        pendingResult(plan.agent.name, plan.task, plan.target.id),
-      );
-      const update = () =>
+      const runs: SubagentRun[] = plans.map((plan) => ({
+        result: pendingResult(plan.agent.name, plan.task, plan.target.id),
+        stop: new AbortController(),
+      }));
+      const update = () => {
+        registry.changed();
         onUpdate?.({
           content: [
             {
@@ -1026,10 +1020,11 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
                   : "Running subagent",
             },
           ],
-          details: { mode, results: [...liveResults] },
+          details: { mode, results: runs.map((run) => run.result) },
         });
+      };
 
-      for (const id of ids) running.add(id);
+      for (const run of runs) registry.add(run);
       try {
         const results = await mapConcurrent(
           plans,
@@ -1037,6 +1032,7 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
           async (plan, index) => {
             const result = await runAgent(
               plan,
+              runs[index],
               {
                 parentModel,
                 availableModels,
@@ -1045,12 +1041,8 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
                 ui: ctx.hasUI ? ctx.ui : undefined,
                 enqueueDialog,
               },
-              (current) => {
-                liveResults[index] = current;
-                update();
-              },
+              update,
             );
-            liveResults[index] = result;
             update();
             return result;
           },
@@ -1069,7 +1061,13 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
           details: { mode, results } as SubagentDetails,
         };
       } finally {
-        for (const id of ids) running.delete(id);
+        // A run that threw never reached a final status.
+        for (const { result } of runs) {
+          if (["pending", "running"].includes(result.progress.status)) {
+            result.progress.status = "failed";
+          }
+        }
+        registry.changed();
       }
     },
     renderCall(
@@ -1148,7 +1146,31 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
 export default function subagents(pi: ExtensionAPI): void {
   const config = loadConfig();
   const agents = loadAgents(config);
-  pi.registerTool(extensionTool(config, agents));
+  const registry = new RunRegistry();
+  pi.registerTool(extensionTool(config, agents, registry));
+
+  pi.registerCommand("agents", {
+    description: "Follow this session's subagents, and message or stop them",
+    handler: async (_args, ctx) => {
+      if (ctx.mode !== "tui") {
+        ctx.ui.notify("The agents overlay requires TUI mode", "warning");
+        return;
+      }
+      await ctx.ui.custom<void>(
+        (tui, theme, _keybindings, done) =>
+          new AgentsOverlay(tui, theme, registry, () => done(undefined)),
+        {
+          overlay: true,
+          overlayOptions: {
+            anchor: "center",
+            width: "90%",
+            minWidth: 60,
+            maxHeight: "90%",
+          },
+        },
+      );
+    },
+  });
 
   let pruned = false;
   pi.on("session_start", (_event, ctx) => {

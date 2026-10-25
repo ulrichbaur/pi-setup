@@ -59,6 +59,27 @@
 - When a run ends, tool rows still showing a partial result get a final one,
   so their redraw timers stop.
 
+## Overlay
+
+- `/agents` lists the subagent runs of this Pi process, newest first.
+  It keeps every running run and the 50 newest finished ones.
+  Extension commands run while Pi streams, so it opens during a run.
+- A run opens to its transcript, which follows new output
+  until the user scrolls up.
+- A running subagent takes messages from the input line:
+  Enter steers it after its current turn,
+  and Alt+Enter queues a follow-up for when it would stop.
+  The input clears on send and gets the text back if sending fails.
+- The tool result lists the user's messages,
+  so the parent model knows why the output may differ from its request.
+- A child stops taking messages at `agent_settled`,
+  because a message sent after it would never run.
+- A finished run is read-only.
+  Continuing it belongs to the parent model through its session id.
+- Ctrl+X stops one run.
+  The other runs of the same tool call continue,
+  and the stopped one fails with "Stopped by the user".
+
 ## Sessions
 
 - Sessions live in `subagents/sessions` below Pi's agent directory.

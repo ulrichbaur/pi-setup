@@ -14,7 +14,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type Component, Container, type TUI } from "@earendil-works/pi-tui";
 import { isRecord } from "../../lib/is-record.ts";
-import type { PendingToolResult, TranscriptMessage } from "./transcript.ts";
+import type { AgentResult } from "./index.ts";
+import {
+  loadTranscript,
+  type PendingToolResult,
+  type TranscriptMessage,
+} from "./transcript.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: definitions differ in their parameter types.
 type AnyToolDefinition = ToolDefinition<any, any, any>;
@@ -218,4 +223,28 @@ export function releaseTranscript(
     }
     entry.running.clear();
   }
+}
+
+export function transcriptView(
+  result: AgentResult,
+  invalidate: () => void,
+): Container | undefined {
+  const cwd = result.cwd ?? process.cwd();
+  if (result.live) {
+    return renderTranscript(result.live.messages, {
+      cwd,
+      streaming: result.live.streaming,
+      pendingResults: result.live.pendingResults,
+      invalidate,
+    });
+  }
+  if (!result.sessionFile || result.messageEnd === undefined) return undefined;
+  return renderTranscript(
+    loadTranscript(
+      result.sessionFile,
+      result.messageStart ?? 0,
+      result.messageEnd,
+    ),
+    { cwd, invalidate },
+  );
 }
