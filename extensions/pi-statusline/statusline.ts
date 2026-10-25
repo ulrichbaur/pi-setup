@@ -21,6 +21,7 @@ const TICK_MS = 30_000;
 
 export type StatuslineRuntime = {
   update(ctx: ExtensionContext): Promise<void>;
+  setSubagentCost(cost: number): void;
   dispose(ctx: ExtensionContext): void;
 };
 
@@ -31,6 +32,8 @@ export function createStatuslineRuntime(
   const lastQuotaByProvider = new Map<string, QuotaStatus>();
   let footerInstalled = false;
   let latestSnapshot: StatusSnapshot = {};
+  // Reported by the subagents extension; kept across snapshot rebuilds.
+  let subagentCost: number | undefined;
   let requestRender: (() => void) | undefined;
   let updateVersion = 0;
   let lastCtx: ExtensionContext | undefined;
@@ -116,6 +119,7 @@ export function createStatuslineRuntime(
     // statusline's model, context, and session details from becoming visible.
     latestSnapshot = createStatusSnapshot(pi, ctx, {
       quota: provider ? lastQuotaByProvider.get(provider) : undefined,
+      subagentCost,
     });
     installFooter(ctx);
     requestRender?.();
@@ -131,7 +135,13 @@ export function createStatuslineRuntime(
     }
     if (!quota) return;
 
-    latestSnapshot = createStatusSnapshot(pi, ctx, { quota });
+    latestSnapshot = createStatusSnapshot(pi, ctx, { quota, subagentCost });
+    requestRender?.();
+  }
+
+  function setSubagentCost(cost: number): void {
+    subagentCost = cost;
+    latestSnapshot = { ...latestSnapshot, subagentCost };
     requestRender?.();
   }
 
@@ -149,7 +159,7 @@ export function createStatuslineRuntime(
     }
   }
 
-  return { update, dispose };
+  return { update, setSubagentCost, dispose };
 }
 
 async function resolveQuota(
@@ -234,7 +244,7 @@ function formatCwdForFooter(cwd: string, home: string | undefined): string {
 export function createStatusSnapshot(
   pi: Pick<ExtensionAPI, "getThinkingLevel">,
   ctx: ExtensionContext,
-  overrides: Pick<StatusSnapshot, "quota"> = {},
+  overrides: Pick<StatusSnapshot, "quota" | "subagentCost"> = {},
 ): StatusSnapshot {
   const totals = readSessionTotals(ctx);
   return {

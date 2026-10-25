@@ -1,12 +1,13 @@
 /**
  * Replaces Pi's TUI footer with compact session details: location, branch,
- * and session name; context use, token counts, cache-hit rate, and cost;
+ * and session name; context use, token counts, cache-hit rate, cost, and
+ * the cost of subagents when the subagents extension reports one;
  * provider, model, and thinking level; and the active provider's Codex or
  * OpenCode Go quota windows.
  *
  * Example (the model details are right-aligned):
  * ~/repo (main) • session-name
- * 25.0%/200k · ↑120k ↓8.4k · CH75.0% · $0.123      (openai-codex) gpt-5 • high
+ * 25.0%/200k · ↑120k ↓8.4k · CH75.0% · $0.123 · sub $0.045   (openai-codex) gpt-5 • high
  * 5h: 25% ↺ 2h15m | 7d: 80% ↺ 3d4h
  *
  * Use `/statusline` to open an interactive editor for the underlying config
@@ -17,6 +18,10 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+  isSubagentCostEvent,
+  SUBAGENT_COST_CHANNEL,
+} from "../../lib/subagent-cost.ts";
 import { loadOpenCodeGoAuthToken } from "./auth.ts";
 import {
   AUTH_PATH,
@@ -57,6 +62,9 @@ export default async function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     for (const message of loadErrors) ctx.ui.notify(message, "error");
     update(ctx);
+  });
+  pi.events.on(SUBAGENT_COST_CHANNEL, (data) => {
+    if (isSubagentCostEvent(data)) statusline.setSubagentCost(data.cost);
   });
   pi.on("model_select", async (_event, ctx) => update(ctx));
   pi.on("thinking_level_select", async (_event, ctx) => update(ctx));

@@ -44,6 +44,17 @@ test("formats default-like stats and right-aligned model details", () => {
   assert.equal(formatStatusStats({ sessionCost: 0 }), "");
 });
 
+test("subagent cost gets its own segment when it is not zero", () => {
+  assert.equal(
+    stripAnsi(formatStatusStats({ sessionCost: 0.123, subagentCost: 0.0045 })),
+    "$0.123 · sub $0.0045",
+  );
+  assert.equal(
+    stripAnsi(formatStatusStats({ sessionCost: 0.123, subagentCost: 0 })),
+    "$0.123",
+  );
+});
+
 test("formats quota windows, stale data, and errors", () => {
   const line = stripAnsi(
     formatQuotaLine({

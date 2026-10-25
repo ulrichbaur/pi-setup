@@ -240,3 +240,33 @@ function makeContext(
     sessionManager: { getBranch: () => [], getSessionName: () => undefined },
   } as unknown as ExtensionContext;
 }
+
+test("a reported subagent cost survives later updates and redraws", async () => {
+  const footerCalls: unknown[] = [];
+  let renders = 0;
+  const ctx = makeContext("tui", {
+    setFooter: (value: unknown) => footerCalls.push(value),
+  });
+  const runtime = createStatuslineRuntime(
+    { getThinkingLevel: () => "off" } as ExtensionAPI,
+    [],
+  );
+  await runtime.update(ctx);
+  const factory = footerCalls[0] as (
+    tui: unknown,
+    theme: unknown,
+    data: unknown,
+  ) => { render(width: number): string[] };
+  const component = factory(
+    { requestRender: () => renders++ },
+    { fg: (_color: string, text: string) => text },
+    { getGitBranch: () => "main", onBranchChange: () => () => {} },
+  );
+
+  runtime.setSubagentCost(0.045);
+  assert.equal(renders, 1);
+  assert.match(component.render(100)[1], /sub \$0\.045/);
+  await runtime.update(ctx);
+  assert.match(component.render(100)[1], /sub \$0\.045/);
+  runtime.dispose(ctx);
+});

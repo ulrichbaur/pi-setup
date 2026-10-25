@@ -1,5 +1,6 @@
 /** Converts session and quota data into the ANSI-styled statusline footer. */
 
+import { formatCost } from "../../lib/subagent-cost.ts";
 import type { QuotaStatus, QuotaWindow } from "./quota/types.ts";
 
 // ─── styling ────────────────────────────────────────────────────────────────
@@ -43,6 +44,7 @@ export type StatusSnapshot = {
   inputTokens?: number;
   outputTokens?: number;
   sessionCost?: number;
+  subagentCost?: number;
   cacheHitRate?: number;
   quota?: QuotaStatus;
 };
@@ -78,9 +80,10 @@ export function formatStatusStats(
   }
 
   if (typeof snapshot.sessionCost === "number" && snapshot.sessionCost > 0) {
-    parts.push(
-      `$${snapshot.sessionCost.toFixed(snapshot.sessionCost < 0.01 ? 4 : 3)}`,
-    );
+    parts.push(formatCost(snapshot.sessionCost));
+  }
+  if (typeof snapshot.subagentCost === "number" && snapshot.subagentCost > 0) {
+    parts.push(`sub ${formatCost(snapshot.subagentCost)}`);
   }
 
   return parts.join(` ${styles.dim("·")} `);
