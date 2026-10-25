@@ -13,6 +13,7 @@
     "fmt-check": "biome format .",
     "lint": "biome check .",
     "test": "node --test --experimental-strip-types 'tests/**/*.test.ts'",
+    "test:tui": "node --test --experimental-strip-types 'tests/tui/**/*.tui.ts'",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

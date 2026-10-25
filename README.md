@@ -249,6 +249,11 @@ every commit:
 git config core.hooksPath scripts/hooks
 ```
 
+`pnpm test:tui` drives the real Pi TUI in a private tmux server against a fake
+local model, so subagent runs, `/agents`, and the statusline are checked
+on screen without cost or network. It needs tmux and is not part of
+`pnpm check`. Its tests live in `tests/tui/` with the `.tui.ts` suffix.
+
 ## Install from Git
 
 Once the repository has a remote, install it with:

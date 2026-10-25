@@ -9,6 +9,8 @@ This repository is an installable Pi package containing personal Pi resources.
   Extensions never import from each other.
 - put tests in `tests/`, mirroring the path of the module under test:
   `extensions/foo/bar.ts` is tested by `tests/extensions/foo/bar.test.ts`.
+- put end-to-end tests that drive the Pi TUI in `tests/tui/`, named `*.tui.ts`,
+  so `pnpm test` skips them; run them with `pnpm test:tui`.
 - put Pi theme JSON files in `themes/`.
 - keep runtime dependencies in `dependencies` and Pi-provided imports in `peerDependencies`.
 - store extension-managed Pi state below `PI_CODING_AGENT_DIR` when set; otherwise use `~/.pi/agent`.
