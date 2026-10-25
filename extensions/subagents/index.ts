@@ -116,6 +116,7 @@ interface SubagentDetails {
 
 interface JsonEvent {
   type?: unknown;
+  toolCallId?: unknown;
   toolName?: unknown;
   args?: unknown;
   message?: unknown;
@@ -377,25 +378,41 @@ function addUsage(target: UsageStats, value: unknown): void {
   }
 }
 
-function applyEvent(result: AgentResult, record: RpcRecord): void {
+// By call id: a model can run several tools at once.
+const runningTools = new WeakMap<AgentResult, Map<string, ToolEvent>>();
+
+function showLatestRunningTool(result: AgentResult): void {
+  const latest = [...(runningTools.get(result)?.values() ?? [])].at(-1);
+  result.progress.currentTool = latest?.tool;
+  result.progress.currentToolArgs = latest?.args;
+}
+
+export function applyEvent(result: AgentResult, record: RpcRecord): void {
   const event = record as JsonEvent;
+  const callId = typeof event.toolCallId === "string" ? event.toolCallId : "";
   if (event.type === "tool_execution_start") {
     result.progress.toolCount += 1;
-    result.progress.currentTool =
-      typeof event.toolName === "string" ? event.toolName : "tool";
-    result.progress.currentToolArgs = toolArgsPreview(event.args);
+    let running = runningTools.get(result);
+    if (!running) {
+      running = new Map();
+      runningTools.set(result, running);
+    }
+    running.set(callId, {
+      tool: typeof event.toolName === "string" ? event.toolName : "tool",
+      args: toolArgsPreview(event.args),
+    });
+    showLatestRunningTool(result);
     return;
   }
   if (event.type === "tool_execution_end") {
-    if (result.progress.currentTool) {
-      result.progress.recentTools.push({
-        tool: result.progress.currentTool,
-        args: result.progress.currentToolArgs ?? "",
-      });
+    const running = runningTools.get(result);
+    const tool = running?.get(callId);
+    if (tool) {
+      running?.delete(callId);
+      result.progress.recentTools.push(tool);
       result.progress.recentTools = result.progress.recentTools.slice(-20);
     }
-    result.progress.currentTool = undefined;
-    result.progress.currentToolArgs = undefined;
+    showLatestRunningTool(result);
     return;
   }
   if (event.type !== "message_end" || !isRecord(event.message)) return;

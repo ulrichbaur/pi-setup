@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
+  applyEvent,
   assertAgentName,
   assertSupportedTools,
   CONFIG_PATH,
@@ -298,4 +299,50 @@ test("a resumed run keeps its agent and working directory", async () => {
       message: `${path}: session header is not valid JSON`,
     });
   });
+});
+
+test("progress tracks tools that run at the same time", () => {
+  const result: Parameters<typeof applyEvent>[0] = {
+    agent: "scout",
+    task: "t",
+    output: "",
+    exitCode: -1,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+      turns: 0,
+    },
+    progress: {
+      status: "running",
+      recentTools: [],
+      toolCount: 0,
+      durationMs: 0,
+      lastMessage: "",
+    },
+  };
+  const start = (id: string, toolName: string, path: string) =>
+    applyEvent(result, {
+      type: "tool_execution_start",
+      toolCallId: id,
+      toolName,
+      args: { path },
+    });
+  const end = (id: string) =>
+    applyEvent(result, { type: "tool_execution_end", toolCallId: id });
+
+  start("a", "ls", "lib");
+  start("b", "read", "lib/x.ts");
+  assert.equal(result.progress.currentTool, "read");
+  end("a");
+  assert.equal(result.progress.currentTool, "read");
+  end("b");
+  assert.equal(result.progress.currentTool, undefined);
+  assert.deepEqual(result.progress.recentTools, [
+    { tool: "ls", args: "lib" },
+    { tool: "read", args: "lib/x.ts" },
+  ]);
+  assert.equal(result.progress.toolCount, 2);
 });
