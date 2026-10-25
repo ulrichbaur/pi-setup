@@ -1,6 +1,6 @@
 import { isRecord } from "../../lib/is-record.ts";
-import type { AgentResult } from "./index.ts";
 import type { SubagentRun } from "./runs.ts";
+import type { AgentResult } from "./types.ts";
 
 const SUBAGENT_TOOL = "subagent";
 

@@ -20,8 +20,11 @@ writeFileSync(
 );
 process.env.PI_CODING_AGENT_DIR = agentDir;
 process.argv[1] = join(import.meta.dirname, "fake-pi.ts");
-const { default: subagents, RESULT_MESSAGE_TYPE } = await import(
+const { default: subagents } = await import(
   "../../../extensions/subagents/index.ts"
+);
+const { RESULT_MESSAGE_TYPE } = await import(
+  "../../../extensions/subagents/types.ts"
 );
 const { RunRegistry } = await import("../../../extensions/subagents/runs.ts");
 const { fakeRun } = await import("./fake-run.ts");

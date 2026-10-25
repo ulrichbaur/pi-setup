@@ -1,10 +1,10 @@
-import type { AgentResult } from "./index.ts";
 import {
   CANCELLED,
   type DialogAnswer,
   type RpcChild,
   type RpcRecord,
 } from "./rpc.ts";
+import type { AgentResult } from "./types.ts";
 
 const MAX_FINISHED_RUNS = 50;
 

@@ -1,5 +1,5 @@
-import type { AgentResult } from "../../../extensions/subagents/index.ts";
 import type { SubagentRun } from "../../../extensions/subagents/runs.ts";
+import type { AgentResult } from "../../../extensions/subagents/types.ts";
 
 export function fakeRun(
   sessionId: string,

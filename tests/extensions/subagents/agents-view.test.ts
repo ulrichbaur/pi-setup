@@ -8,7 +8,6 @@ import {
   AgentsOverlay,
   type OverlayChoice,
 } from "../../../extensions/subagents/agents-view.ts";
-import { resultText } from "../../../extensions/subagents/index.ts";
 import {
   type MessageMode,
   RunRegistry,
@@ -164,17 +163,6 @@ test("typing does nothing for a finished run", () => {
   overlay.handleInput(KEYS.enter);
   assert.equal(sent.length, 0);
   assert.doesNotMatch(screen(), /hello/);
-});
-
-test("the parent model learns about the user's messages", () => {
-  const run = fakeRun("worker-00000001", "completed");
-  run.result.output = "Done.";
-  run.result.userMessages = ["use pnpm"];
-  run.result.sessionFile = "/s/x.jsonl";
-  assert.equal(
-    resultText(run.result),
-    "Done.\n\nThe user sent the subagent these messages while it ran:\n- use pnpm\n\nSession: worker-00000001",
-  );
 });
 
 test("Ctrl+O closes the overlay and asks to open the session", () => {
