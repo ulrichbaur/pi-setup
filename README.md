@@ -167,9 +167,18 @@ The extension depends on the web-fetch and web-search extensions and on the
 shared bash policy in `lib/`. Removing one of them makes the agents that use
 it fail when the extension loads.
 
+Each run saves its session in `subagents/sessions/` below the agent directory,
+apart from your normal sessions.
+The tool result ends with `Session: <id>`.
+Pass that id as `session` with a follow-up `task` to continue the subagent with its earlier context.
+To work in a subagent session yourself, open its file with `pi --session <path>`.
+The expanded tool result shows the path.
+
 The optional config lives in `~/.pi/agent/subagents.json` (or below
 `PI_CODING_AGENT_DIR` when set) and overrides the built-in defaults:
-concurrency 4, at most 8 parallel tasks, and no model preferences.
+concurrency 4, at most 8 parallel tasks, sessions kept for 90 days,
+and no model preferences.
+Older sessions are deleted when Pi starts.
 Each agent may set a `models` array of `provider/model` IDs.
 The first available preferred model is selected. An agent without an available
 preferred model inherits the parent model and thinking level.
@@ -179,6 +188,7 @@ A config entry for an agent without a matching agent file is an error.
 {
   "maxConcurrency": 4,
   "maxParallelTasks": 8,
+  "sessionRetentionDays": 90,
   "agents": {
     "worker": {
       "models": ["provider/model-id", "other-provider/fallback-model"]

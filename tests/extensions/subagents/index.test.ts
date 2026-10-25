@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
+  assertAgentName,
   assertSupportedTools,
   CONFIG_PATH,
   DEFAULT_CONFIG,
   parseSubagentConfig,
+  planRun,
   selectSubagentModel,
   subagentArguments,
   subagentToolSelectionArgs,
 } from "../../../extensions/subagents/index.ts";
+import { withTempDir } from "../../helpers.ts";
 
 test("accepts inherited and preferred subagent models", () => {
   assert.deepEqual(
@@ -30,6 +34,7 @@ test("accepts inherited and preferred subagent models", () => {
     {
       maxConcurrency: 3,
       maxParallelTasks: 6,
+      sessionRetentionDays: 90,
       agents: {
         scout: { models: [] },
         worker: {
@@ -80,6 +85,7 @@ test("fills omitted subagent config fields with defaults", () => {
     {
       maxConcurrency: DEFAULT_CONFIG.maxConcurrency,
       maxParallelTasks: DEFAULT_CONFIG.maxParallelTasks,
+      sessionRetentionDays: 90,
       agents: { worker: { models: ["a/b"] } },
     },
   );
@@ -99,6 +105,10 @@ test("rejects invalid subagent limits", () => {
         agents: {},
       }),
     /maxConcurrency must be a positive integer/,
+  );
+  assert.throws(
+    () => parseSubagentConfig({ sessionRetentionDays: 1.5 }),
+    /sessionRetentionDays must be a positive integer/,
   );
 });
 
@@ -155,11 +165,15 @@ test("child Pi processes run in RPC mode with the agent's settings", () => {
     "/tmp/scout.md",
     "openai/gpt-5",
     "high",
+    ["--session-dir", "/sessions", "--session-id", "scout-1a2b3c4d"],
   );
-  assert.deepEqual(args.slice(0, 5), [
+  assert.deepEqual(args.slice(0, 8), [
     "--mode",
     "rpc",
-    "--no-session",
+    "--session-dir",
+    "/sessions",
+    "--session-id",
+    "scout-1a2b3c4d",
     "--no-skills",
     "--no-extensions",
   ]);
@@ -174,8 +188,105 @@ test("child Pi processes run in RPC mode with the agent's settings", () => {
   ]);
   assert.ok(args.some((arg) => arg.endsWith(join("web-search", "index.ts"))));
   assert.ok(
-    !subagentArguments([], "/tmp/x.md", undefined, "off").includes(
+    !subagentArguments([], "/tmp/x.md", undefined, "off", []).includes(
       "--thinking",
     ),
   );
+});
+
+test("agent names must be usable inside session ids", () => {
+  assert.equal(assertAgentName("scout.md", "code_review-2"), "code_review-2");
+  assert.throws(
+    () => assertAgentName("scout.md", "my scout"),
+    /scout\.md: agent name my scout may contain only/,
+  );
+  assert.throws(() => assertAgentName("x.md", "-scout"), /must start/);
+});
+
+const AGENTS = [
+  {
+    name: "scout",
+    description: "recon",
+    tools: ["read"],
+    modelPreferences: [],
+    systemPrompt: "",
+  },
+  {
+    name: "worker",
+    description: "edits",
+    tools: ["read"],
+    modelPreferences: [],
+    systemPrompt: "",
+  },
+];
+
+test("a new run gets a fresh session named after its task", () => {
+  const plan = planRun(
+    { agent: "scout", task: "Map the\n  auth module" },
+    AGENTS,
+    "/repo",
+    "/sessions",
+  );
+  assert.equal(plan.agent.name, "scout");
+  assert.equal(plan.cwd, "/repo");
+  assert.equal(plan.target.kind, "new");
+  assert.match(plan.target.id, /^scout-[0-9a-f]{8}$/);
+  assert.equal(
+    plan.target.kind === "new" && plan.target.name,
+    "scout: Map the auth module",
+  );
+  assert.throws(
+    () => planRun({ task: "x" }, AGENTS, "/repo", "/sessions"),
+    /Provide an agent or a session/,
+  );
+});
+
+test("a resumed run keeps its agent and working directory", async () => {
+  await withTempDir("subagent-sessions-", (directory) => {
+    const path = join(
+      directory,
+      "2026-10-25T10-00-00-000Z_worker-0a1b2c3d.jsonl",
+    );
+    writeFileSync(
+      path,
+      `${JSON.stringify({ type: "session", id: "worker-0a1b2c3d", cwd: "/elsewhere" })}\n`,
+    );
+    const plan = planRun(
+      { session: "worker-0a1b2c3d", task: "Also add tests" },
+      AGENTS,
+      "/repo",
+      directory,
+    );
+    assert.equal(plan.agent.name, "worker");
+    assert.equal(plan.cwd, "/elsewhere");
+    assert.deepEqual(plan.target, {
+      kind: "resume",
+      id: "worker-0a1b2c3d",
+      path,
+    });
+
+    const resume = (request: object) =>
+      planRun({ task: "x", ...request }, AGENTS, "/repo", directory);
+    assert.throws(
+      () => resume({ session: "worker-0a1b2c3d", agent: "scout" }),
+      /belongs to worker, not scout/,
+    );
+    assert.throws(
+      () => resume({ session: "worker-0a1b2c3d", cwd: "/repo" }),
+      /cwd cannot be combined with session/,
+    );
+    assert.throws(
+      () => resume({ session: "worker-ffffffff" }),
+      /Unknown subagent session worker-ffffffff/,
+    );
+    assert.throws(
+      () => resume({ session: "../worker" }),
+      /Malformed subagent session id/,
+    );
+
+    writeFileSync(path, "not json\n");
+    assert.throws(() => resume({ session: "worker-0a1b2c3d" }), {
+      message: `${path}: session header is not valid JSON`,
+    });
+  });
 });

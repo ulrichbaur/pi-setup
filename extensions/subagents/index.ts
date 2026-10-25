@@ -17,6 +17,18 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { isRecord } from "../../lib/is-record.ts";
 import { RpcChild, type RpcRecord } from "./rpc.ts";
+import {
+  AGENT_NAME_PATTERN,
+  findSession,
+  newSessionId,
+  pruneSessions,
+  readSessionCwd,
+  SESSIONS_DIR,
+  type SessionTarget,
+  sessionAgent,
+  sessionArguments,
+  sessionName,
+} from "./sessions.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = join(EXTENSION_DIR, "..", "..");
@@ -38,6 +50,7 @@ interface AgentModelConfig {
 interface SubagentConfig {
   maxConcurrency: number;
   maxParallelTasks: number;
+  sessionRetentionDays: number;
   agents: Record<string, AgentModelConfig>;
 }
 
@@ -82,6 +95,10 @@ interface AgentResult {
   model?: string;
   usage: UsageStats;
   progress: AgentProgress;
+  // Absent in results saved before subagent sessions existed; sessionFile also
+  // when a run failed before Pi wrote it.
+  sessionId?: string;
+  sessionFile?: string;
 }
 
 interface SubagentDetails {
@@ -99,6 +116,7 @@ interface JsonEvent {
 export const DEFAULT_CONFIG: SubagentConfig = {
   maxConcurrency: 4,
   maxParallelTasks: 8,
+  sessionRetentionDays: 90,
   agents: {},
 };
 
@@ -161,6 +179,11 @@ export function parseSubagentConfig(value: unknown): SubagentConfig {
       "maxParallelTasks",
       DEFAULT_CONFIG.maxParallelTasks,
     ),
+    sessionRetentionDays: positiveInteger(
+      value.sessionRetentionDays,
+      "sessionRetentionDays",
+      DEFAULT_CONFIG.sessionRetentionDays,
+    ),
     agents,
   };
 }
@@ -214,6 +237,16 @@ export function assertSupportedTools(
   return tools;
 }
 
+/** Agent names become part of session ids, so they use a restricted set. */
+export function assertAgentName(fileName: string, name: string): string {
+  if (!AGENT_NAME_PATTERN.test(name)) {
+    throw new Error(
+      `${fileName}: agent name ${name} may contain only letters, digits, _, and -, and must start with a letter or digit`,
+    );
+  }
+  return name;
+}
+
 function loadAgents(config: SubagentConfig): AgentDefinition[] {
   const names = existsSync(AGENTS_DIR) ? readdirSync(AGENTS_DIR) : [];
   const agents = names
@@ -231,7 +264,7 @@ function loadAgents(config: SubagentConfig): AgentDefinition[] {
       const configured = config.agents[frontmatter.name] ?? { models: [] };
       const tools = assertSupportedTools(name, parseTools(frontmatter.tools));
       return {
-        name: frontmatter.name,
+        name: assertAgentName(name, frontmatter.name),
         description: frontmatter.description,
         tools,
         modelPreferences: configured.models,
@@ -282,10 +315,15 @@ function emptyUsage(): UsageStats {
   };
 }
 
-function pendingResult(agent: string, task: string): AgentResult {
+function pendingResult(
+  agent: string,
+  task: string,
+  sessionId: string,
+): AgentResult {
   return {
     agent,
     task,
+    sessionId,
     output: "",
     exitCode: -1,
     usage: emptyUsage(),
@@ -397,14 +435,10 @@ export function subagentArguments(
   systemPromptPath: string,
   selectedModel: string | undefined,
   thinkingLevel: string | undefined,
+  sessionArgs: string[],
 ): string[] {
-  const args = [
-    "--mode",
-    "rpc",
-    "--no-session",
-    "--no-skills",
-    "--no-extensions",
-  ];
+  const args = ["--mode", "rpc", ...sessionArgs];
+  args.push("--no-skills", "--no-extensions");
   args.push(...subagentToolSelectionArgs(tools));
 
   const extensionPaths = new Set(
@@ -424,17 +458,86 @@ export function subagentArguments(
   return args;
 }
 
+function findAgent(agents: AgentDefinition[], name: string): AgentDefinition {
+  const agent = agents.find((candidate) => candidate.name === name);
+  if (!agent) {
+    throw new Error(
+      `Unknown agent ${name}. Available agents: ${agents.map((candidate) => candidate.name).join(", ")}`,
+    );
+  }
+  return agent;
+}
+
+export interface TaskRequest {
+  agent?: string;
+  task: string;
+  cwd?: string;
+  session?: string;
+}
+
+interface RunPlan {
+  agent: AgentDefinition;
+  task: string;
+  cwd: string;
+  target: SessionTarget;
+}
+
+export function planRun(
+  request: TaskRequest,
+  agents: AgentDefinition[],
+  defaultCwd: string,
+  directory: string = SESSIONS_DIR,
+): RunPlan {
+  const { task, session } = request;
+  if (!session) {
+    if (!request.agent) throw new Error("Provide an agent or a session");
+    const agent = findAgent(agents, request.agent);
+    return {
+      agent,
+      task,
+      cwd: request.cwd ?? defaultCwd,
+      target: {
+        kind: "new",
+        id: newSessionId(agent.name),
+        name: sessionName(agent.name, task),
+      },
+    };
+  }
+
+  const agentName = sessionAgent(session);
+  if (!agentName) throw new Error(`Malformed subagent session id ${session}`);
+  if (request.agent && request.agent !== agentName) {
+    throw new Error(
+      `Subagent session ${session} belongs to ${agentName}, not ${request.agent}`,
+    );
+  }
+  if (request.cwd) {
+    throw new Error(
+      "cwd cannot be combined with session; a resumed subagent keeps its working directory",
+    );
+  }
+  const path = findSession(session, directory);
+  if (!path) {
+    throw new Error(`Unknown subagent session ${session} in ${directory}`);
+  }
+  return {
+    agent: findAgent(agents, agentName),
+    task,
+    cwd: readSessionCwd(path),
+    target: { kind: "resume", id: session, path },
+  };
+}
+
 async function runAgent(
-  agent: AgentDefinition,
-  task: string,
-  cwd: string,
+  plan: RunPlan,
   parentModel: string | undefined,
   availableModels: ReadonlySet<string>,
   thinkingLevel: string | undefined,
   signal: AbortSignal | undefined,
   onUpdate?: (result: AgentResult) => void,
 ): Promise<AgentResult> {
-  const result = pendingResult(agent.name, task);
+  const { agent, task, cwd, target } = plan;
+  const result = pendingResult(agent.name, task, target.id);
   const selectedModel = selectSubagentModel(
     agent.modelPreferences,
     availableModels,
@@ -459,6 +562,7 @@ async function runAgent(
         promptPath,
         selectedModel,
         inheritThinkingLevel ? thinkingLevel : undefined,
+        sessionArguments(target),
       ),
     );
     const child = new RpcChild(invocation.command, invocation.args, cwd);
@@ -507,6 +611,8 @@ async function runAgent(
       signal?.removeEventListener("abort", abort);
       result.exitCode = await child.close();
     }
+    result.sessionFile =
+      target.kind === "resume" ? target.path : findSession(target.id);
     if (result.exitCode !== 0 && !result.progress.error && child.stderr()) {
       result.progress.error = child.stderr();
     }
@@ -580,7 +686,7 @@ function renderAgent(
   const tokens = result.usage.input + result.usage.output;
   container.addChild(
     new Text(
-      `${icon} ${theme.fg("toolTitle", theme.bold(result.agent))} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}`)}`,
+      `${icon} ${theme.fg("toolTitle", theme.bold(result.agent))} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}${result.sessionId ? ` · ${result.sessionId}` : ""}`)}`,
       0,
       0,
     ),
@@ -623,18 +729,41 @@ function renderAgent(
       new Text(theme.fg("error", `Error: ${result.progress.error}`), 0, 0),
     );
   }
+  if (expanded && result.sessionFile) {
+    container.addChild(
+      new Text(theme.fg("dim", `Session: ${result.sessionFile}`), 0, 0),
+    );
+  }
   return container;
 }
 
+/** The text the parent model receives for one subagent run. */
+function resultText(result: AgentResult): string {
+  const output = result.output || "(no output)";
+  return result.sessionFile
+    ? `${output}\n\nSession: ${result.sessionId}`
+    : output;
+}
+
+const SESSION_DESCRIPTION =
+  "Session id of an earlier subagent run to continue; task is then the follow-up message";
+
 const TaskSchema = Type.Object({
-  agent: Type.String({ description: "Agent name" }),
+  agent: Type.Optional(
+    Type.String({ description: "Agent name; optional with session" }),
+  ),
   task: Type.String({ description: "Self-contained task description" }),
   cwd: Type.Optional(
-    Type.String({ description: "Subagent working directory" }),
+    Type.String({
+      description: "Subagent working directory; not allowed with session",
+    }),
   ),
+  session: Type.Optional(Type.String({ description: SESSION_DESCRIPTION })),
 });
 
 function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
+  // Ids of sessions with a live child; one session runs in one child.
+  const running = new Set<string>();
   return {
     name: "subagent" as const,
     label: "Subagent",
@@ -645,6 +774,7 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
       "Use subagent for delegated reasoning or autonomous work, not to parallelize simple file or web tool calls.",
       "Subagents have no parent conversation context, so every subagent task must include all required context.",
       "Use subagent tasks for independent parallel delegations.",
+      "To continue an earlier subagent with its context, pass its session id and a follow-up task instead of restating the context.",
     ],
     parameters: Type.Object({
       agent: Type.Optional(
@@ -663,14 +793,18 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
           description: "Subagent working directory in single mode",
         }),
       ),
+      session: Type.Optional(
+        Type.String({ description: `${SESSION_DESCRIPTION}, in single mode` }),
+      ),
     }),
     async execute(
       _toolCallId: string,
       params: {
         agent?: string;
         task?: string;
-        tasks?: Array<{ agent: string; task: string; cwd?: string }>;
+        tasks?: TaskRequest[];
         cwd?: string;
+        session?: string;
       },
       signal: AbortSignal | undefined,
       onUpdate:
@@ -689,10 +823,40 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
       },
     ) {
       const hasParallel = Boolean(params.tasks?.length);
-      const hasSingle = Boolean(params.agent && params.task);
+      const hasSingle = Boolean(
+        params.task && (params.agent || params.session),
+      );
       if (Number(hasParallel) + Number(hasSingle) !== 1) {
-        throw new Error("Provide exactly one mode: agent + task, or tasks");
+        throw new Error(
+          "Provide exactly one mode: agent or session + task, or tasks",
+        );
       }
+      const mode = hasParallel ? "parallel" : "single";
+      const requests: TaskRequest[] = params.tasks?.length
+        ? params.tasks
+        : [
+            {
+              agent: params.agent,
+              task: params.task as string,
+              cwd: params.cwd,
+              session: params.session,
+            },
+          ];
+      if (requests.length > config.maxParallelTasks) {
+        throw new Error(
+          `At most ${config.maxParallelTasks} parallel subagent tasks are allowed`,
+        );
+      }
+      const plans = requests.map((request) =>
+        planRun(request, agents, ctx.cwd),
+      );
+      const ids = plans.map((plan) => plan.target.id);
+      ids.forEach((id, index) => {
+        if (running.has(id) || ids.indexOf(id) !== index) {
+          throw new Error(`Subagent session ${id} is already running`);
+        }
+      });
+
       const parentModel = ctx.model
         ? `${ctx.model.provider}/${ctx.model.id}`
         : undefined;
@@ -701,44 +865,31 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
           .getAvailable()
           .map((model) => `${model.provider}/${model.id}`),
       );
-      const findAgent = (name: string) => {
-        const agent = agents.find((candidate) => candidate.name === name);
-        if (!agent) {
-          throw new Error(
-            `Unknown agent ${name}. Available agents: ${agents.map((candidate) => candidate.name).join(", ")}`,
-          );
-        }
-        return agent;
-      };
+      const liveResults = plans.map((plan) =>
+        pendingResult(plan.agent.name, plan.task, plan.target.id),
+      );
+      const update = () =>
+        onUpdate?.({
+          content: [
+            {
+              type: "text",
+              text:
+                mode === "parallel"
+                  ? `Running ${plans.length} subagents`
+                  : "Running subagent",
+            },
+          ],
+          details: { mode, results: [...liveResults] },
+        });
 
-      if (params.tasks?.length) {
-        if (params.tasks.length > config.maxParallelTasks) {
-          throw new Error(
-            `At most ${config.maxParallelTasks} parallel subagent tasks are allowed`,
-          );
-        }
-        for (const task of params.tasks) findAgent(task.agent);
-        const liveResults = params.tasks.map((task) =>
-          pendingResult(task.agent, task.task),
-        );
-        const update = () =>
-          onUpdate?.({
-            content: [
-              {
-                type: "text",
-                text: `Running ${params.tasks?.length ?? 0} subagents`,
-              },
-            ],
-            details: { mode: "parallel", results: [...liveResults] },
-          });
+      for (const id of ids) running.add(id);
+      try {
         const results = await mapConcurrent(
-          params.tasks,
+          plans,
           config.maxConcurrency,
-          async (task, index) => {
+          async (plan, index) => {
             const result = await runAgent(
-              findAgent(task.agent),
-              task.task,
-              task.cwd ?? ctx.cwd,
+              plan,
               parentModel,
               availableModels,
               ctx.thinkingLevel,
@@ -753,45 +904,29 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
             return result;
           },
         );
-        const content = results
-          .map(
-            (result) =>
-              `## ${result.agent}${result.progress.status === "failed" ? " (FAILED)" : ""}\n\n${result.output || "(no output)"}`,
-          )
-          .join("\n\n---\n\n");
+        const text =
+          mode === "single"
+            ? resultText(results[0])
+            : results
+                .map(
+                  (result) =>
+                    `## ${result.agent}${result.progress.status === "failed" ? " (FAILED)" : ""}\n\n${resultText(result)}`,
+                )
+                .join("\n\n---\n\n");
         return {
-          content: [{ type: "text" as const, text: content }],
-          details: { mode: "parallel" as const, results },
+          content: [{ type: "text" as const, text }],
+          details: { mode, results } as SubagentDetails,
         };
+      } finally {
+        for (const id of ids) running.delete(id);
       }
-
-      const agent = findAgent(params.agent as string);
-      const result = await runAgent(
-        agent,
-        params.task as string,
-        params.cwd ?? ctx.cwd,
-        parentModel,
-        availableModels,
-        ctx.thinkingLevel,
-        signal,
-        (current) =>
-          onUpdate?.({
-            content: [{ type: "text", text: "Running subagent" }],
-            details: { mode: "single", results: [current] },
-          }),
-      );
-      return {
-        content: [
-          { type: "text" as const, text: result.output || "(no output)" },
-        ],
-        details: { mode: "single" as const, results: [result] },
-      };
     },
     renderCall(
       args: {
         agent?: string;
         task?: string;
-        tasks?: Array<{ agent: string; task: string }>;
+        tasks?: TaskRequest[];
+        session?: string;
       },
       theme: {
         bold(text: string): string;
@@ -805,8 +940,13 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
           0,
         );
       }
+      const agent =
+        args.agent ?? (args.session ? sessionAgent(args.session) : undefined);
+      const resume = args.session
+        ? ` ${theme.fg("dim", `(continues ${args.session})`)}`
+        : "";
       return new Text(
-        `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", args.agent ?? "")}`,
+        `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", agent ?? "")}${resume}`,
         0,
         0,
       );
@@ -855,4 +995,14 @@ export default function subagents(pi: ExtensionAPI): void {
   const config = loadConfig();
   const agents = loadAgents(config);
   pi.registerTool(extensionTool(config, agents));
+
+  let pruned = false;
+  pi.on("session_start", (_event, ctx) => {
+    if (pruned) return;
+    pruned = true;
+    pruneSessions(config.sessionRetentionDays).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Subagent session cleanup failed: ${message}`, "warning");
+    });
+  });
 }
