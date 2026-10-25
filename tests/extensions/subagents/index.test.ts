@@ -10,8 +10,10 @@ import {
   CONFIG_PATH,
   DEFAULT_CONFIG,
   finalStatus,
+  mergeAgents,
   parseSubagentConfig,
   planRun,
+  readAgentDir,
   selectSubagentModel,
   subagentArguments,
   subagentToolSelectionArgs,
@@ -223,6 +225,7 @@ const AGENTS = [
     tools: ["read"],
     modelPreferences: [],
     systemPrompt: "",
+    source: "package" as const,
   },
   {
     name: "worker",
@@ -230,6 +233,7 @@ const AGENTS = [
     tools: ["read"],
     modelPreferences: [],
     systemPrompt: "",
+    source: "package" as const,
   },
 ];
 
@@ -400,4 +404,66 @@ test("a settled run survives a forced stop; other failures do not", () => {
   assert.equal(finalStatus(1, false, true, undefined), "failed");
   assert.equal(finalStatus(1, true, false, undefined), "failed");
   assert.equal(finalStatus(0, true, false, "fetch failed"), "failed");
+});
+
+test("agent folders load with their source; later ones override", async () => {
+  await withTempDir("subagent-agents-", (directory) => {
+    const config = parseSubagentConfig({});
+    const write = (name: string, text: string) =>
+      writeFileSync(join(directory, name), text);
+    write(
+      "scout.md",
+      "---\nname: scout\ndescription: project scout\ntools: read\n---\nLook closely.",
+    );
+    write("notes.txt", "ignored");
+    const project = readAgentDir(directory, "project", config);
+    assert.deepEqual(
+      project.map(({ name, description, tools, source, systemPrompt }) => ({
+        name,
+        description,
+        tools,
+        source,
+        systemPrompt: systemPrompt.trim(),
+      })),
+      [
+        {
+          name: "scout",
+          description: "project scout",
+          tools: ["read"],
+          source: "project",
+          systemPrompt: "Look closely.",
+        },
+      ],
+    );
+    assert.deepEqual(
+      readAgentDir(join(directory, "missing"), "user", config),
+      [],
+    );
+
+    const merged = mergeAgents(AGENTS, project);
+    assert.deepEqual(
+      merged.map((agent) => [agent.name, agent.source]),
+      [
+        ["scout", "project"],
+        ["worker", "package"],
+      ],
+    );
+
+    write("broken.md", "---\nname: broken\n---\nNo description.");
+    assert.throws(() => readAgentDir(directory, "project", config), {
+      message: `${join(directory, "broken.md")}: an agent needs a name and a description`,
+    });
+    write("broken.md", "---\nname: scout\ndescription: twin\n---\n");
+    assert.throws(
+      () => readAgentDir(directory, "project", config),
+      /agent scout is defined twice/,
+    );
+    write("broken.md", "---\nname: shell\ndescription: x\ntools: bash\n---\n");
+    assert.throws(
+      () => readAgentDir(directory, "user", config),
+      new RegExp(
+        `${join(directory, "broken.md").replaceAll(".", "\\.")}: unsupported subagent tool bash`,
+      ),
+    );
+  });
 });

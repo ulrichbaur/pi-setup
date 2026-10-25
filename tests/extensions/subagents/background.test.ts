@@ -55,8 +55,15 @@ function load(ui?: Record<string, unknown>) {
     registerCommand: () => {},
     registerMessageRenderer: () => {},
     events: { emit: () => {}, on: () => () => {} },
+    // Pi runs every handler of an event in registration order.
     on: (event: string, handler: () => void) => {
-      handlers[event] = handler;
+      const previous = handlers[event];
+      handlers[event] = previous
+        ? () => {
+            previous();
+            handler();
+          }
+        : handler;
     },
     sendMessage: (message: Record<string, unknown>, options: unknown) => {
       sent.push({ message, options });

@@ -383,7 +383,7 @@ export class AgentsOverlay implements Component, Focusable {
 
   private summary(run: SubagentRun): string {
     const { result } = run;
-    return `${this.statusIcon(run)} ${this.theme.bold(result.agent)} ${this.theme.fg(
+    return `${this.statusIcon(run)} ${this.theme.bold(result.agent)}${result.agentSource ? ` [${result.agentSource}]` : ""} ${this.theme.fg(
       "dim",
       `${result.sessionId ?? ""} · ${result.progress.status} · ${result.progress.toolCount} tools · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}`,
     )}`;

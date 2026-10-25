@@ -85,12 +85,15 @@ interface SubagentConfig {
   agents: Record<string, AgentModelConfig>;
 }
 
+type AgentSource = "package" | "user" | "project";
+
 interface AgentDefinition {
   name: string;
   description: string;
   tools: string[];
   modelPreferences: string[];
   systemPrompt: string;
+  source: AgentSource;
 }
 
 interface ToolEvent {
@@ -139,6 +142,8 @@ export interface AgentResult {
   // Present only while the run streams; the saved result reads the file.
   live?: LiveTranscript;
   userMessages?: string[];
+  // Where a user or project agent came from; absent for package agents.
+  agentSource?: "user" | "project";
 }
 
 export interface SubagentDetails {
@@ -310,39 +315,67 @@ export function assertAgentName(fileName: string, name: string): string {
   return name;
 }
 
-function loadAgents(config: SubagentConfig): AgentDefinition[] {
-  const names = existsSync(AGENTS_DIR) ? readdirSync(AGENTS_DIR) : [];
-  const agents = names
-    .filter((name) => name.endsWith(".md"))
-    .map((name): AgentDefinition | null => {
-      const content = readFileSync(join(AGENTS_DIR, name), "utf8");
-      const { frontmatter, body } =
-        parseFrontmatter<Record<string, unknown>>(content);
-      if (
-        typeof frontmatter.name !== "string" ||
-        typeof frontmatter.description !== "string"
-      ) {
-        return null;
-      }
-      const configured = config.agents[frontmatter.name] ?? { models: [] };
-      const tools = assertSupportedTools(name, parseTools(frontmatter.tools));
-      return {
-        name: assertAgentName(name, frontmatter.name),
-        description: frontmatter.description,
-        tools,
-        modelPreferences: configured.models,
-        systemPrompt: body,
-      };
-    })
-    .filter((agent): agent is AgentDefinition => agent !== null);
+export const USER_AGENTS_DIR = join(getAgentDir(), "agents");
 
-  const loadedNames = new Set(agents.map((agent) => agent.name));
-  if (loadedNames.size !== agents.length) {
-    throw new Error(`${AGENTS_DIR}: agent names must be unique`);
+export function projectAgentsDir(cwd: string): string {
+  return join(cwd, ".pi", "agents");
+}
+
+export function readAgentDir(
+  directory: string,
+  source: AgentSource,
+  config: SubagentConfig,
+): AgentDefinition[] {
+  const names = existsSync(directory)
+    ? readdirSync(directory).filter((name) => name.endsWith(".md"))
+    : [];
+  const agents = names.map((name): AgentDefinition => {
+    const file = join(directory, name);
+    const label = source === "package" ? name : file;
+    const { frontmatter, body } = parseFrontmatter<Record<string, unknown>>(
+      readFileSync(file, "utf8"),
+    );
+    if (
+      typeof frontmatter.name !== "string" ||
+      typeof frontmatter.description !== "string"
+    ) {
+      throw new Error(`${label}: an agent needs a name and a description`);
+    }
+    return {
+      name: assertAgentName(label, frontmatter.name),
+      description: frontmatter.description,
+      tools: assertSupportedTools(label, parseTools(frontmatter.tools)),
+      modelPreferences: config.agents[frontmatter.name]?.models ?? [],
+      systemPrompt: body,
+      source,
+    };
+  });
+  const seen = new Set<string>();
+  for (const agent of agents) {
+    if (seen.has(agent.name)) {
+      throw new Error(`${directory}: agent ${agent.name} is defined twice`);
+    }
+    seen.add(agent.name);
   }
+  return agents;
+}
+
+/** Later lists override earlier ones by name: package, user, project. */
+export function mergeAgents(...lists: AgentDefinition[][]): AgentDefinition[] {
+  const byName = new Map<string, AgentDefinition>();
+  for (const agent of lists.flat()) byName.set(agent.name, agent);
+  return [...byName.values()];
+}
+
+function loadAgents(config: SubagentConfig): AgentDefinition[] {
+  const agents = mergeAgents(
+    readAgentDir(AGENTS_DIR, "package", config),
+    readAgentDir(USER_AGENTS_DIR, "user", config),
+  );
   if (agents.length === 0) {
     throw new Error(`${AGENTS_DIR}: no valid agent definitions found`);
   }
+  const loadedNames = new Set(agents.map((agent) => agent.name));
   for (const name of Object.keys(config.agents)) {
     if (!loadedNames.has(name)) {
       throw new Error(
@@ -865,7 +898,7 @@ function renderAgent(
   const tokens = result.usage.input + result.usage.output;
   container.addChild(
     new Text(
-      `${icon} ${theme.fg("toolTitle", theme.bold(result.agent))} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}${result.sessionId ? ` · ${result.sessionId}` : ""}`)}`,
+      `${icon} ${theme.fg("toolTitle", theme.bold(result.agent))}${result.agentSource ? theme.fg("dim", ` [${result.agentSource}]`) : ""} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}${result.sessionId ? ` · ${result.sessionId}` : ""}`)}`,
       0,
       0,
     ),
@@ -1111,21 +1144,36 @@ async function runAll(
   );
 }
 
+/**
+ * State every registration of the tool shares. The tool is registered again
+ * when project agents load, and runs must keep one limit and one queue.
+ */
+interface ToolServices {
+  registry: RunRegistry;
+  delivery: Delivery;
+  hideThinking: () => boolean;
+  // One limit for every run of this session, background runs included.
+  limiter: Limiter;
+  // Dialogs from all subagents share one queue, so only one is open at a time.
+  enqueueDialog: <T>(task: () => Promise<T>) => Promise<T>;
+}
+
+function agentLabel(agent: AgentDefinition): string {
+  return agent.source === "package"
+    ? agent.name
+    : `${agent.name} [${agent.source}]`;
+}
+
 function extensionTool(
   config: SubagentConfig,
   agents: AgentDefinition[],
-  registry: RunRegistry,
-  delivery: Delivery,
-  hideThinking: () => boolean,
+  services: ToolServices,
 ) {
-  // One limit for every run of this session, background runs included.
-  const limiter = new Limiter(config.maxConcurrency);
-  // Dialogs from all subagents share one queue, so only one is open at a time.
-  const enqueueDialog = createDialogQueue();
+  const { registry, delivery, hideThinking, limiter, enqueueDialog } = services;
   return {
     name: "subagent" as const,
     label: "Subagent",
-    description: `Run an isolated subagent. Available agents: ${agents.map((agent) => `${agent.name} (${agent.description})`).join(", ")}.`,
+    description: `Run an isolated subagent. Available agents: ${agents.map((agent) => `${agentLabel(agent)} (${agent.description})`).join(", ")}.`,
     promptSnippet:
       "Delegate reasoning or autonomous work to an isolated subagent",
     promptGuidelines: [
@@ -1234,7 +1282,12 @@ function extensionTool(
           .map((model) => `${model.provider}/${model.id}`),
       );
       const runs: SubagentRun[] = plans.map((plan) => ({
-        result: pendingResult(plan.agent.name, plan.task, plan.target.id),
+        result: {
+          ...pendingResult(plan.agent.name, plan.task, plan.target.id),
+          ...(plan.agent.source === "package"
+            ? {}
+            : { agentSource: plan.agent.source }),
+        },
         stop: new AbortController(),
         pendingDialogs: [],
       }));
@@ -1382,9 +1435,38 @@ export default function subagents(
   };
   // Follows the user's setting, which the TUI also changes at runtime.
   const hideThinking = () => pi.getSettings().hideThinkingBlock === true;
-  pi.registerTool(
-    extensionTool(config, agents, registry, delivery, hideThinking),
-  );
+  const services: ToolServices = {
+    registry,
+    delivery,
+    hideThinking,
+    limiter: new Limiter(config.maxConcurrency),
+    enqueueDialog: createDialogQueue(),
+  };
+  pi.registerTool(extensionTool(config, agents, services));
+
+  // Project agents depend on the working directory and on project trust,
+  // which only a session knows.
+  pi.on("session_start", (_event, ctx) => {
+    const directory = projectAgentsDir(ctx.cwd);
+    if (!existsSync(directory)) return;
+    if (!ctx.isProjectTrusted()) {
+      ctx.ui.notify(
+        `${directory}: project agents were not loaded because this project is not trusted`,
+        "warning",
+      );
+      return;
+    }
+    try {
+      const project = readAgentDir(directory, "project", config);
+      if (project.length === 0) return;
+      pi.registerTool(
+        extensionTool(config, mergeAgents(agents, project), services),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Project agents were not loaded: ${message}`, "error");
+    }
+  });
   pi.registerMessageRenderer<SubagentDetails>(
     RESULT_MESSAGE_TYPE,
     (message, options, theme) => {

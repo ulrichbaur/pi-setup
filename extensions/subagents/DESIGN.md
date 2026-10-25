@@ -5,6 +5,24 @@
 - Each subagent keeps a saved session.
   The parent model can resume it, and the user can open it with `pi --session <path>`.
 
+## Agents
+
+- Agents come from the package, from `agents/` in Pi's agent directory,
+  and from the project's `.pi/agents/`.
+  The most specific wins by name: project over user over package.
+  The tool description marks user and project agents, and so do results.
+- Package and user agents load with the extension.
+  A malformed file fails the load with its path.
+- Project agents depend on the working directory and on project trust,
+  so they load at `session_start`, and the tool is registered again.
+  The limiter, dialog queue, and registry are shared across registrations.
+- In an untrusted project, project agents are skipped with a notice.
+  A malformed project file skips them all with an error notice
+  that names the file.
+- `subagents.json` entries must match a package or user agent,
+  because project agents differ between projects.
+  A project agent with the name of a configured agent gets its models.
+
 ## Transport
 
 - Start the child with the same Pi binary as the parent, in `--mode rpc`.

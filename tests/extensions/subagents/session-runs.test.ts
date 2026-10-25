@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -12,6 +12,11 @@ after(() => rmSync(agentDir, { recursive: true, force: true }));
 writeFileSync(
   join(agentDir, "subagents.json"),
   JSON.stringify({ maxConcurrency: 1 }),
+);
+mkdirSync(join(agentDir, "agents"));
+writeFileSync(
+  join(agentDir, "agents", "reviewer.md"),
+  "---\nname: reviewer\ndescription: reviews diffs\ntools: read\n---\nReview.",
 );
 process.env.PI_CODING_AGENT_DIR = agentDir;
 process.argv[1] = join(import.meta.dirname, "fake-pi.ts");
@@ -28,6 +33,7 @@ function load() {
   const handlers: Record<string, Handler> = {};
   const costs: unknown[] = [];
   let tool: {
+    description: string;
     execute: (...args: unknown[]) => Promise<unknown>;
   };
   subagents(
@@ -41,8 +47,15 @@ function load() {
         emit: (channel: string, data: unknown) => costs.push([channel, data]),
         on: () => () => {},
       },
+      // Pi runs every handler of an event in registration order.
       on: (event: string, handler: Handler) => {
-        handlers[event] = handler;
+        const previous = handlers[event];
+        handlers[event] = previous
+          ? (data, ctx) => {
+              previous(data, ctx);
+              handler(data, ctx);
+            }
+          : handler;
       },
       sendMessage: () => {},
     } as unknown as ExtensionAPI,
@@ -56,7 +69,13 @@ function load() {
   };
   const run = (params: Record<string, unknown>) =>
     tool.execute("call", params, undefined, undefined, ctx);
-  return { registry, handlers, run, costs };
+  return {
+    registry,
+    handlers,
+    run,
+    costs,
+    description: () => tool.description,
+  };
 }
 
 const until = async (condition: () => boolean) => {
@@ -105,6 +124,8 @@ test("a session start rebuilds the list from the saved results", () => {
   handlers.session_start(
     {},
     {
+      cwd: "/nonexistent-project",
+      isProjectTrusted: () => true,
       sessionManager: {
         getBranch: () => [
           {
@@ -157,6 +178,8 @@ test("the subagent cost total covers saved and running runs", () => {
   };
   const branch: unknown[] = [savedToolResult];
   const ctx = {
+    cwd: "/nonexistent-project",
+    isProjectTrusted: () => true,
     sessionManager: { getBranch: () => branch },
     ui: { notify: () => {} },
   };
@@ -205,4 +228,49 @@ test("the subagent cost total covers saved and running runs", () => {
     ctx,
   );
   near(lastCost(), 0.026);
+});
+
+test("project agents load in trusted projects and override by name", () => {
+  const project = mkdtempSync(join(tmpdir(), "subagent-project-"));
+  try {
+    mkdirSync(join(project, ".pi", "agents"), { recursive: true });
+    writeFileSync(
+      join(project, ".pi", "agents", "scout.md"),
+      "---\nname: scout\ndescription: knows this repo\ntools: read\n---\nRepo notes.",
+    );
+    const start = (trusted: boolean) => {
+      const loaded = load();
+      const notices: string[] = [];
+      loaded.handlers.session_start(
+        {},
+        {
+          cwd: project,
+          isProjectTrusted: () => trusted,
+          sessionManager: { getBranch: () => [] },
+          ui: { notify: (message: string) => notices.push(message) },
+        },
+      );
+      return { description: loaded.description(), notices };
+    };
+
+    const untrusted = start(false);
+    assert.match(untrusted.description, /reviewer \[user\] \(reviews diffs\)/);
+    assert.doesNotMatch(untrusted.description, /knows this repo/);
+    assert.match(untrusted.notices.join("\n"), /not trusted/);
+
+    const trusted = start(true);
+    assert.match(trusted.description, /scout \[project\] \(knows this repo\)/);
+    assert.match(trusted.description, /worker \(/);
+    assert.deepEqual(trusted.notices, []);
+
+    writeFileSync(join(project, ".pi", "agents", "bad.md"), "no frontmatter");
+    const broken = start(true);
+    assert.match(
+      broken.notices.join("\n"),
+      /Project agents were not loaded: .*bad\.md/,
+    );
+    assert.doesNotMatch(broken.description, /knows this repo/);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
 });

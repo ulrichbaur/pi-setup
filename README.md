@@ -161,6 +161,9 @@ size limits.
 
 `extensions/subagents/` adds the `subagent` tool with single and parallel modes.
 It provides scout, researcher, and worker agents in isolated Pi processes.
+Add or override agents with Markdown files in `agents/` in the agent directory,
+or per project in `.pi/agents/` (loaded only in trusted projects).
+The most specific file wins by name: project over yours over the package.
 The researcher receives only the web tools.
 The worker receives file tools and `safe_bash`.
 When you can answer, `safe_bash` asks you before any command that bash-guard
@@ -210,7 +213,8 @@ Older sessions are deleted when Pi starts.
 Each agent may set a `models` array of `provider/model` IDs.
 The first available preferred model is selected. An agent without an available
 preferred model inherits the parent model and thinking level.
-A config entry for an agent without a matching agent file is an error.
+A config entry for an agent without a matching package or user agent file
+is an error.
 
 ```json
 {
