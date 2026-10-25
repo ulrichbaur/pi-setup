@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { readdir, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "../../lib/is-record.ts";
 
@@ -47,6 +47,29 @@ export function findSession(
   }
   const name = names.find((candidate) => candidate.endsWith(`_${id}.jsonl`));
   return name ? join(directory, name) : undefined;
+}
+
+/** The session id in a file name of the form `<timestamp>_<id>.jsonl`. */
+export function sessionIdOf(path: string): string {
+  return basename(path, ".jsonl").split("_").at(-1) ?? "";
+}
+
+export function recentSessionIds(
+  limit: number,
+  directory: string = SESSIONS_DIR,
+): string[] {
+  let names: string[];
+  try {
+    names = readdirSync(directory);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => name.endsWith(".jsonl"))
+    .sort()
+    .reverse()
+    .slice(0, limit)
+    .map(sessionIdOf);
 }
 
 export function readSessionCwd(path: string): string {

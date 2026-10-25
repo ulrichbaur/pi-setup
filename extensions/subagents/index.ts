@@ -16,13 +16,14 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { isRecord } from "../../lib/is-record.ts";
-import { AgentsOverlay } from "./agents-view.ts";
+import { AgentsOverlay, type OverlayChoice } from "./agents-view.ts";
 import {
   createDialogQueue,
   forwardDialog,
   forwardNotification,
   type ParentUI,
 } from "./dialogs.ts";
+import { openSubagentSession, returnToParent } from "./navigation.ts";
 import { RpcChild, type RpcRecord } from "./rpc.ts";
 import { RunRegistry, type SubagentRun } from "./runs.ts";
 import {
@@ -31,6 +32,7 @@ import {
   newSessionId,
   pruneSessions,
   readSessionCwd,
+  recentSessionIds,
   SESSIONS_DIR,
   type SessionTarget,
   sessionAgent,
@@ -878,6 +880,16 @@ function addFooter(
     container.addChild(
       new Text(theme.fg("dim", `Session: ${result.sessionFile}`), 0, 0),
     );
+    container.addChild(
+      new Text(
+        theme.fg(
+          "dim",
+          `Work in it yourself: /agents open ${result.sessionId}`,
+        ),
+        0,
+        0,
+      ),
+    );
   }
 }
 
@@ -1251,10 +1263,12 @@ function extensionTool(
   };
 }
 
-export default function subagents(pi: ExtensionAPI): void {
+export default function subagents(
+  pi: ExtensionAPI,
+  registry: RunRegistry = new RunRegistry(),
+): void {
   const config = loadConfig();
   const agents = loadAgents(config);
-  const registry = new RunRegistry();
   // Tokens of background calls that may still deliver to this session.
   const pending = new Set<{ cancelled: boolean }>();
   const delivery: Delivery = {
@@ -1304,15 +1318,52 @@ export default function subagents(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("agents", {
-    description: "Follow this session's subagents, and message or stop them",
-    handler: async (_args, ctx) => {
+    description:
+      "Follow subagents; `open <id>` switches to a subagent session, `back` returns",
+    getArgumentCompletions: (prefix) => {
+      if (prefix.startsWith("open ")) {
+        const typed = prefix.slice("open ".length);
+        return recentSessionIds(20)
+          .filter((id) => id.startsWith(typed))
+          .map((id) => ({ value: `open ${id}`, label: id }));
+      }
+      return [
+        {
+          value: "open ",
+          label: "open",
+          description: "Open a subagent session",
+        },
+        {
+          value: "back",
+          label: "back",
+          description: "Return to the parent session",
+        },
+      ].filter((item) => item.value.startsWith(prefix));
+    },
+    handler: async (args, ctx) => {
+      const [action, id, ...rest] = args.trim().split(/\s+/).filter(Boolean);
+      if (action === "open" && id && rest.length === 0) {
+        await openSubagentSession(ctx, registry, id);
+        return;
+      }
+      if (action === "back" && !id) {
+        await returnToParent(ctx);
+        return;
+      }
+      if (action) {
+        ctx.ui.notify(
+          "Usage: /agents, /agents open <id>, or /agents back",
+          "warning",
+        );
+        return;
+      }
       if (ctx.mode !== "tui") {
         ctx.ui.notify("The agents overlay requires TUI mode", "warning");
         return;
       }
-      await ctx.ui.custom<void>(
+      const choice = await ctx.ui.custom<OverlayChoice>(
         (tui, theme, _keybindings, done) =>
-          new AgentsOverlay(tui, theme, registry, () => done(undefined)),
+          new AgentsOverlay(tui, theme, registry, done),
         {
           overlay: true,
           overlayOptions: {
@@ -1323,6 +1374,7 @@ export default function subagents(pi: ExtensionAPI): void {
           },
         },
       );
+      if (choice) await openSubagentSession(ctx, registry, choice.open);
     },
   });
 

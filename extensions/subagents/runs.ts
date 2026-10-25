@@ -68,4 +68,28 @@ export class RunRegistry {
   stop(run: SubagentRun): void {
     if (isActive(run)) run.stop.abort();
   }
+
+  activeRuns(): SubagentRun[] {
+    return this.runs.filter(isActive);
+  }
+
+  /**
+   * Resolves once all runs have ended, so their sessions are complete;
+   * false on timeout.
+   */
+  stopAll(timeoutMs = 15_000): Promise<boolean> {
+    for (const run of this.activeRuns()) run.stop.abort();
+    return new Promise((resolve) => {
+      const finish = (ended: boolean) => {
+        clearTimeout(timer);
+        unsubscribe();
+        resolve(ended);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      const unsubscribe = this.subscribe(() => {
+        if (this.activeRuns().length === 0) finish(true);
+      });
+      if (this.activeRuns().length === 0) finish(true);
+    });
+  }
 }

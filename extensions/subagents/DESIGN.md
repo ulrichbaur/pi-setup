@@ -96,6 +96,26 @@
 - A run that throws becomes a failed result,
   so every run reaches a final status and the call always delivers.
 
+## Opening a session
+
+- `/agents open <id>`, or Ctrl+O in the overlay,
+  switches this Pi to a saved subagent session.
+  `/agents back` switches to the session it was opened from.
+- The opened session runs with the user's normal setup:
+  tools, skills, extensions, and bash-guard.
+  The agent's role prompt does not apply there.
+- A switch replaces the extension runtime, so the way back lives in
+  `subagents/returns.json` below the agent directory.
+  It maps each opened session to its parent and to the session's
+  message count at opening.
+- Opening needs an idle Pi and a saved parent session.
+- Opening closes the parent session, which stops its running subagents.
+  The user confirms first, and the switch waits until their sessions are
+  complete, so two writers never share a file.
+- When the opened session grew, going back leaves the parent model a note
+  with the newest answer and the session id.
+  The note joins the next turn and starts none.
+
 ## Sessions
 
 - Sessions live in `subagents/sessions` below Pi's agent directory.

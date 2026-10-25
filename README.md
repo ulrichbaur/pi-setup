@@ -187,8 +187,10 @@ Background runs stop when the session closes; their sessions stay saved.
 Open a running subagent to follow it, send it a message
 (Enter steers, Alt+Enter queues a follow-up), or stop it with Ctrl+X.
 The parent model sees the messages you sent.
-To work in a subagent session yourself, open its file with `pi --session <path>`.
-The expanded tool result shows the path.
+To work in a subagent session yourself, run `/agents open <id>`
+or press Ctrl+O in `/agents`. It runs with your normal tools and extensions.
+`/agents back` returns to the parent session and leaves the parent model
+a note with the subagent's newest answer.
 
 The optional config lives in `~/.pi/agent/subagents.json` (or below
 `PI_CODING_AGENT_DIR` when set) and overrides the built-in defaults:

@@ -7,6 +7,7 @@ import subagents, {
   renderDetails,
   type SubagentDetails,
 } from "../../../extensions/subagents/index.ts";
+import { RunRegistry } from "../../../extensions/subagents/runs.ts";
 
 const theme = {
   fg: (_color: string, text: string) => text,
@@ -46,7 +47,8 @@ function load() {
       delivered();
     },
   } as unknown as ExtensionAPI;
-  subagents(pi);
+  const registry = new RunRegistry();
+  subagents(pi, registry);
   const ctx = {
     cwd: process.cwd(),
     modelRegistry: { getAvailable: () => [] },
@@ -55,7 +57,7 @@ function load() {
   };
   const run = (params: Record<string, unknown>) =>
     tool.execute("call", params, undefined, undefined, ctx);
-  return { run, sent, arrived, handlers };
+  return { run, sent, arrived, handlers, registry };
 }
 
 test("a background run returns at once and delivers its result later", async () => {
@@ -102,10 +104,11 @@ test("a foreground run waits for the child and returns its output", async () => 
 });
 
 test("results of a shut-down session are never delivered", async () => {
-  const { run, sent, handlers } = load();
+  const { run, sent, handlers, registry } = load();
   await run({ agent: "scout", task: "look around", background: true });
   handlers.session_shutdown();
-  // The fake child answers within a few hundred milliseconds.
-  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  assert.equal(await registry.stopAll(), true);
+  // Delivery follows in the same promise chain, before the next macrotask.
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sent.length, 0);
 });

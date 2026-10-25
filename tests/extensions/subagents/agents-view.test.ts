@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import { AgentsOverlay } from "../../../extensions/subagents/agents-view.ts";
+import {
+  AgentsOverlay,
+  type OverlayChoice,
+} from "../../../extensions/subagents/agents-view.ts";
 import { resultText } from "../../../extensions/subagents/index.ts";
 import {
   type MessageMode,
@@ -18,6 +21,7 @@ const KEYS = {
   altEnter: "\x1b\r",
   escape: "\x1b",
   stop: "\x18",
+  open: "\x0f",
 };
 
 const theme = {
@@ -36,8 +40,10 @@ function setup() {
     requestRender: () => {},
   } as unknown as TUI;
   let closed = false;
-  const overlay = new AgentsOverlay(tui, theme, registry, () => {
+  let choice: OverlayChoice;
+  const overlay = new AgentsOverlay(tui, theme, registry, (chosen) => {
     closed = true;
+    choice = chosen;
   });
   overlay.focused = true;
   const type = (text: string) => {
@@ -50,7 +56,15 @@ function setup() {
       .join("\n")
       // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escapes.
       .replace(/\x1b_[^\x07]*\x07/g, "");
-  return { registry, overlay, sent, type, screen, isClosed: () => closed };
+  return {
+    registry,
+    overlay,
+    sent,
+    type,
+    screen,
+    isClosed: () => closed,
+    choice: () => choice,
+  };
 }
 
 test("the list shows runs newest first and opens the selected one", () => {
@@ -146,6 +160,15 @@ test("the parent model learns about the user's messages", () => {
     resultText(run.result),
     "Done.\n\nThe user sent the subagent these messages while it ran:\n- use pnpm\n\nSession: worker-00000001",
   );
+});
+
+test("Ctrl+O closes the overlay and asks to open the session", () => {
+  const { registry, overlay, isClosed, choice } = setup();
+  registry.add(fakeRun("scout-00000001", "completed"));
+  overlay.handleInput(KEYS.enter);
+  overlay.handleInput(KEYS.open);
+  assert.equal(isClosed(), true);
+  assert.deepEqual(choice(), { open: "scout-00000001" });
 });
 
 test("a long list keeps the selected run visible and fits the overlay", () => {

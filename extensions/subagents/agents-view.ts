@@ -20,6 +20,8 @@ function formatDuration(milliseconds: number): string {
     : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
+export type OverlayChoice = { open: string } | undefined;
+
 function isActive(run: SubagentRun): boolean {
   const { status } = run.result.progress;
   return status === "pending" || status === "running";
@@ -41,9 +43,14 @@ export class AgentsOverlay implements Component, Focusable {
   private readonly tui: TUI;
   private readonly theme: Theme;
   private readonly registry: RunRegistry;
-  private readonly done: () => void;
+  private readonly done: (choice: OverlayChoice) => void;
 
-  constructor(tui: TUI, theme: Theme, registry: RunRegistry, done: () => void) {
+  constructor(
+    tui: TUI,
+    theme: Theme,
+    registry: RunRegistry,
+    done: (choice: OverlayChoice) => void,
+  ) {
     this.tui = tui;
     this.theme = theme;
     this.registry = registry;
@@ -87,9 +94,14 @@ export class AgentsOverlay implements Component, Focusable {
     this.input.invalidate();
   }
 
-  private close(): void {
+  private close(choice?: OverlayChoice): void {
     this.unsubscribe();
-    this.done();
+    this.done(choice);
+  }
+
+  // Only the command context can switch sessions.
+  private openSession(run: SubagentRun): void {
+    if (run.result.sessionId) this.close({ open: run.result.sessionId });
   }
 
   private runs(): SubagentRun[] {
@@ -117,6 +129,8 @@ export class AgentsOverlay implements Component, Focusable {
       this.open(this.selected);
     } else if (matchesKey(data, Key.ctrl("x")) && this.selected) {
       this.stop(this.selected);
+    } else if (matchesKey(data, Key.ctrl("o")) && this.selected) {
+      this.openSession(this.selected);
     }
   }
 
@@ -129,6 +143,8 @@ export class AgentsOverlay implements Component, Focusable {
       this.notice = undefined;
     } else if (matchesKey(data, Key.ctrl("x"))) {
       this.stop(run);
+    } else if (matchesKey(data, Key.ctrl("o"))) {
+      this.openSession(run);
     } else if (matchesKey(data, Key.pageUp)) {
       this.scrollFromEnd += this.viewportHeight;
     } else if (matchesKey(data, Key.pageDown)) {
@@ -259,7 +275,10 @@ export class AgentsOverlay implements Component, Focusable {
             ];
           });
     const footer = [
-      this.theme.fg("dim", " ↑↓ select · Enter open · Ctrl+X stop · Esc close"),
+      this.theme.fg(
+        "dim",
+        " ↑↓ select · Enter view · Ctrl+O open session · Ctrl+X stop · Esc close",
+      ),
     ];
     const height = this.measureViewport(width, maxHeight, header, footer);
     const selectedLine = this.selected ? runs.indexOf(this.selected) * 2 : 0;
@@ -309,14 +328,14 @@ export class AgentsOverlay implements Component, Focusable {
       footer.push(
         this.theme.fg(
           "dim",
-          " Enter steer · Alt+Enter follow-up · PgUp/PgDn scroll · Ctrl+X stop · Esc back",
+          " Enter steer · Alt+Enter follow-up · PgUp/PgDn · Ctrl+O open session · Ctrl+X stop · Esc back",
         ),
       );
     } else {
       footer.push(
         this.theme.fg(
           "dim",
-          " Finished: read-only · PgUp/PgDn scroll · Esc back",
+          " Finished: read-only · PgUp/PgDn scroll · Ctrl+O open session · Esc back",
         ),
       );
     }
