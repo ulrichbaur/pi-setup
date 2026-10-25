@@ -20,7 +20,22 @@ process.argv[1] = join(import.meta.dirname, "fake-pi.ts");
 
 type Sent = { message: Record<string, unknown>; options: unknown };
 
-function load() {
+function fakeUI() {
+  const calls: string[] = [];
+  const ui = {
+    notify: (message: string) => calls.push(`notify: ${message}`),
+    confirm: async () => {
+      calls.push("confirm");
+      return true;
+    },
+    select: async () => undefined,
+    input: async () => undefined,
+    editor: async () => undefined,
+  };
+  return { ui, calls };
+}
+
+function load(ui?: Record<string, unknown>) {
   const sent: Sent[] = [];
   const handlers: Record<string, () => void> = {};
   let tool: {
@@ -52,8 +67,8 @@ function load() {
   const ctx = {
     cwd: process.cwd(),
     modelRegistry: { getAvailable: () => [] },
-    hasUI: false,
-    ui: {},
+    hasUI: ui !== undefined,
+    ui: ui ?? {},
   };
   const run = (params: Record<string, unknown>) =>
     tool.execute("call", params, undefined, undefined, ctx);
@@ -111,4 +126,29 @@ test("results of a shut-down session are never delivered", async () => {
   // Delivery follows in the same promise chain, before the next macrotask.
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sent.length, 0);
+});
+
+test("a background question waits in /agents instead of a dialog", async () => {
+  const { ui, calls } = fakeUI();
+  const { run, sent, arrived, registry } = load(ui);
+  await run({ agent: "scout", task: "look around", background: true });
+  while (!registry.list()[0]?.pendingDialogs.length) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.match(
+    calls.join("\n"),
+    /notify: scout-\w+ is waiting for your answer/,
+  );
+  assert.equal(calls.includes("confirm"), false);
+
+  registry.list()[0].pendingDialogs[0].answer({ confirmed: true });
+  await arrived;
+  assert.equal(sent.length, 1);
+});
+
+test("a foreground question still opens a dialog", async () => {
+  const { ui, calls } = fakeUI();
+  const { run } = load(ui);
+  await run({ agent: "scout", task: "look around" });
+  assert.deepEqual(calls, ["confirm"]);
 });

@@ -183,6 +183,10 @@ With `background: true`, the tool returns at once.
 The result arrives later as a message and starts a model turn,
 or waits for the current one to end.
 Background runs stop when the session closes; their sessions stay saved.
+A background run never opens a dialog over your work.
+Its questions and approvals wait in `/agents`, and you get a notice.
+An unanswered one is cancelled after 10 minutes:
+`safe_bash` then blocks the command, and `ask_user` reports no answer.
 `/agents` lists this session's subagent runs, even while one runs.
 Open a running subagent to follow it, send it a message
 (Enter steers, Alt+Enter queues a follow-up), or stop it with Ctrl+X.
@@ -195,7 +199,7 @@ a note with the subagent's newest answer.
 The optional config lives in `~/.pi/agent/subagents.json` (or below
 `PI_CODING_AGENT_DIR` when set) and overrides the built-in defaults:
 concurrency 4, at most 8 parallel tasks, sessions kept for 90 days,
-and no model preferences.
+background questions cancelled after 10 minutes, and no model preferences.
 Older sessions are deleted when Pi starts.
 Each agent may set a `models` array of `provider/model` IDs.
 The first available preferred model is selected. An agent without an available
@@ -207,6 +211,7 @@ A config entry for an agent without a matching agent file is an error.
   "maxConcurrency": 4,
   "maxParallelTasks": 8,
   "sessionRetentionDays": 90,
+  "backgroundQuestionTimeoutMinutes": 10,
   "agents": {
     "worker": {
       "models": ["provider/model-id", "other-provider/fallback-model"]

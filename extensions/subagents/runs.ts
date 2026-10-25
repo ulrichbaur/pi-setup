@@ -1,5 +1,10 @@
 import type { AgentResult } from "./index.ts";
-import type { RpcChild } from "./rpc.ts";
+import {
+  CANCELLED,
+  type DialogAnswer,
+  type RpcChild,
+  type RpcRecord,
+} from "./rpc.ts";
 
 const MAX_FINISHED_RUNS = 50;
 
@@ -9,6 +14,12 @@ export interface SubagentRun {
   readonly stop: AbortController;
   // Set while the child can still take messages.
   child?: RpcChild;
+  readonly pendingDialogs: PendingDialog[];
+}
+
+export interface PendingDialog {
+  readonly request: RpcRecord;
+  answer(answer: DialogAnswer): void;
 }
 
 export type MessageMode = "steer" | "followUp";
@@ -63,6 +74,38 @@ export class RunRegistry {
     );
     run.result.userMessages = [...(run.result.userMessages ?? []), message];
     this.changed();
+  }
+
+  /** Queues a child dialog for an answer in /agents. */
+  ask(
+    run: SubagentRun,
+    request: RpcRecord,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<DialogAnswer> {
+    if (signal.aborted) return Promise.resolve(CANCELLED);
+    const limit =
+      typeof request.timeout === "number"
+        ? Math.min(timeoutMs, request.timeout)
+        : timeoutMs;
+    return new Promise((resolve) => {
+      const finish = (answer: DialogAnswer) => {
+        const index = run.pendingDialogs.indexOf(question);
+        if (index === -1) return;
+        run.pendingDialogs.splice(index, 1);
+        clearTimeout(timer);
+        signal.removeEventListener("abort", cancel);
+        this.changed();
+        resolve(answer);
+      };
+      const cancel = () => finish(CANCELLED);
+      const question: PendingDialog = { request, answer: finish };
+      const timer = setTimeout(cancel, limit);
+      timer.unref();
+      signal.addEventListener("abort", cancel, { once: true });
+      run.pendingDialogs.push(question);
+      this.changed();
+    });
   }
 
   stop(run: SubagentRun): void {

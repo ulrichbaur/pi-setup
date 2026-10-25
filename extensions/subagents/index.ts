@@ -24,7 +24,7 @@ import {
   type ParentUI,
 } from "./dialogs.ts";
 import { openSubagentSession, returnToParent } from "./navigation.ts";
-import { RpcChild, type RpcRecord } from "./rpc.ts";
+import { type DialogHandler, RpcChild, type RpcRecord } from "./rpc.ts";
 import { RunRegistry, type SubagentRun } from "./runs.ts";
 import {
   AGENT_NAME_PATTERN,
@@ -70,6 +70,7 @@ interface SubagentConfig {
   maxConcurrency: number;
   maxParallelTasks: number;
   sessionRetentionDays: number;
+  backgroundQuestionTimeoutMinutes: number;
   agents: Record<string, AgentModelConfig>;
 }
 
@@ -160,6 +161,7 @@ export const DEFAULT_CONFIG: SubagentConfig = {
   maxConcurrency: 4,
   maxParallelTasks: 8,
   sessionRetentionDays: 90,
+  backgroundQuestionTimeoutMinutes: 10,
   agents: {},
 };
 
@@ -226,6 +228,11 @@ export function parseSubagentConfig(value: unknown): SubagentConfig {
       value.sessionRetentionDays,
       "sessionRetentionDays",
       DEFAULT_CONFIG.sessionRetentionDays,
+    ),
+    backgroundQuestionTimeoutMinutes: positiveInteger(
+      value.backgroundQuestionTimeoutMinutes,
+      "backgroundQuestionTimeoutMinutes",
+      DEFAULT_CONFIG.backgroundQuestionTimeoutMinutes,
     ),
     agents,
   };
@@ -609,6 +616,11 @@ interface RunContext {
   // The parent UI, or undefined when no user can answer.
   ui: ParentUI | undefined;
   enqueueDialog: <T>(task: () => Promise<T>) => Promise<T>;
+  // Background runs queue their dialogs in /agents instead of opening them
+  // over the user's work.
+  background: boolean;
+  registry: RunRegistry;
+  questionTimeoutMs: number;
 }
 
 /**
@@ -670,19 +682,35 @@ async function runAgent(
         ui !== undefined,
       ),
     );
+    let onDialog: DialogHandler | undefined;
+    if (ui && context.background) {
+      onDialog = (request, childExited) => {
+        ui.notify(
+          `${target.id} is waiting for your answer. Open /agents to reply.`,
+          "info",
+        );
+        return context.registry.ask(
+          run,
+          request,
+          context.questionTimeoutMs,
+          AbortSignal.any([signal, childExited]),
+        );
+      };
+    } else if (ui) {
+      onDialog = (request, childExited) =>
+        forwardDialog(
+          context.enqueueDialog,
+          ui,
+          request,
+          target.id,
+          AbortSignal.any([signal, childExited]),
+        );
+    }
     const child = new RpcChild(
       invocation.command,
       invocation.args,
       cwd,
-      ui &&
-        ((request, childExited) =>
-          forwardDialog(
-            context.enqueueDialog,
-            ui,
-            request,
-            target.id,
-            AbortSignal.any([signal, childExited]),
-          )),
+      onDialog,
     );
 
     run.child = child;
@@ -1198,6 +1226,7 @@ function extensionTool(
       const runs: SubagentRun[] = plans.map((plan) => ({
         result: pendingResult(plan.agent.name, plan.task, plan.target.id),
         stop: new AbortController(),
+        pendingDialogs: [],
       }));
       const update = () => {
         registry.changed();
@@ -1223,6 +1252,9 @@ function extensionTool(
         signal,
         ui: ctx.hasUI ? ctx.ui : undefined,
         enqueueDialog,
+        background: params.background === true,
+        registry,
+        questionTimeoutMs: config.backgroundQuestionTimeoutMinutes * 60_000,
       };
 
       if (params.background) {

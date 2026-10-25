@@ -36,6 +36,10 @@
 - With a parent UI, a child's `select`, `confirm`, `input`, and `editor` requests
   open in the parent, titled with the session id.
   Notifications appear there too; other UI requests are ignored.
+- A background run opens no dialog over the user's work.
+  Its requests wait in `/agents`, marked on the run, and the user gets a notice.
+  A request is cancelled after `backgroundQuestionTimeoutMinutes` (default 10),
+  after the child's own timeout, or when the run stops.
 - One dialog is open at a time, across all subagents.
   A dialog whose child exited, whose run was aborted,
   or whose timeout passed while it waited is never shown.

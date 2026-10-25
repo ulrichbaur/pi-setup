@@ -7,6 +7,7 @@ export function fakeRun(
 ): SubagentRun {
   return {
     stop: new AbortController(),
+    pendingDialogs: [],
     result: {
       agent: "scout",
       task: `task of ${sessionId}`,

@@ -183,3 +183,52 @@ test("a long list keeps the selected run visible and fits the overlay", () => {
   assert.match(screen(), /› ⟳ scout scout-00000000/);
   assert.doesNotMatch(screen(), /scout-00000029/);
 });
+
+test("a waiting question is marked and answered in the overlay", async () => {
+  const { registry, overlay, type, sent, screen } = setup();
+  const run = fakeRun("worker-00000001");
+  registry.add(run);
+  const live = new AbortController().signal;
+  const confirm = registry.ask(
+    run,
+    {
+      method: "confirm",
+      title: "Run this command?",
+      message: "• rm deletes files\n\nCommand:\nrm notes.txt",
+    },
+    60_000,
+    live,
+  );
+  assert.match(screen(), /worker-00000001 .* · waiting for your answer/);
+
+  overlay.handleInput(KEYS.enter);
+  assert.match(screen(), /\? Run this command\?/);
+  assert.match(screen(), /rm notes\.txt/);
+  overlay.handleInput(KEYS.altEnter);
+  assert.equal(sent.length, 0);
+  overlay.handleInput(KEYS.down);
+  overlay.handleInput(KEYS.enter);
+  assert.deepEqual(await confirm, { confirmed: false });
+
+  const select = registry.ask(
+    run,
+    { method: "select", title: "Which database?", options: ["Postgres"] },
+    60_000,
+    live,
+  );
+  overlay.handleInput(KEYS.down);
+  overlay.handleInput(KEYS.enter);
+  assert.deepEqual(await select, { cancelled: true });
+
+  const input = registry.ask(
+    run,
+    { method: "input", title: "Branch?" },
+    60_000,
+    live,
+  );
+  type("main");
+  overlay.handleInput(KEYS.enter);
+  assert.deepEqual(await input, { value: "main" });
+  assert.match(screen(), /Answered\./);
+  assert.match(screen(), /Enter steer/);
+});
