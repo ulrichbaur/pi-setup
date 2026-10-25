@@ -164,7 +164,11 @@ export const RESULT_MESSAGE_TYPE = "subagent-result";
  */
 export interface Delivery {
   start(): { cancelled: boolean };
-  deliver(token: { cancelled: boolean }, details: SubagentDetails): void;
+  deliver(
+    token: { cancelled: boolean },
+    details: SubagentDetails,
+    heading?: string,
+  ): void;
 }
 
 interface JsonEvent {
@@ -1024,9 +1028,12 @@ export function combinedText(details: SubagentDetails): string {
     .join("\n\n---\n\n");
 }
 
-function backgroundText(results: AgentResult[]): string {
+function backgroundText(results: AgentResult[], each: boolean): string {
   const ids = results.map((result) => result.sessionId).join(", ");
-  return `Started in the background: ${ids}. The result arrives as a message when ${results.length > 1 ? "all of them end" : "the run ends"}. Continue with other work; do not wait or poll for it. The user can follow it with /agents.`;
+  const arrival = each
+    ? "Each result arrives as its own message when its run ends"
+    : `The result arrives as a message when ${results.length > 1 ? "all of them end" : "the run ends"}`;
+  return `Started in the background: ${ids}. ${arrival}. Continue with other work; do not wait or poll for it. The user can follow it with /agents.`;
 }
 
 export function renderDetails(
@@ -1112,6 +1119,7 @@ async function runAll(
   limiter: Limiter,
   context: RunContext,
   update: () => void,
+  onRunEnd?: (result: AgentResult, index: number) => void,
 ): Promise<AgentResult[]> {
   return Promise.all(
     plans.map(async (plan, index) => {
@@ -1139,6 +1147,7 @@ async function runAll(
         run.result.output ||= `Error: ${run.result.progress.error}`;
       }
       update();
+      onRunEnd?.(run.result, index);
       return run.result;
     }),
   );
@@ -1182,6 +1191,7 @@ function extensionTool(
       "Use subagent tasks for independent parallel delegations.",
       "To continue an earlier subagent with its context, pass its session id and a follow-up task instead of restating the context.",
       "Set background: true for long work you do not need right away. The tool returns at once, and the result arrives later as a message; continue with other work and do not poll for it.",
+      "With several background tasks whose results are useful on their own, set deliverEach: true to get each result as soon as its run ends.",
     ],
     parameters: Type.Object({
       agent: Type.Optional(
@@ -1209,6 +1219,12 @@ function extensionTool(
             "Return at once and deliver the result later as a message",
         }),
       ),
+      deliverEach: Type.Optional(
+        Type.Boolean({
+          description:
+            "With background tasks, deliver each result when its run ends instead of one message when all end",
+        }),
+      ),
     }),
     async execute(
       _toolCallId: string,
@@ -1219,6 +1235,7 @@ function extensionTool(
         cwd?: string;
         session?: string;
         background?: boolean;
+        deliverEach?: boolean;
       },
       signal: AbortSignal | undefined,
       onUpdate:
@@ -1321,18 +1338,31 @@ function extensionTool(
       };
 
       if (params.background) {
+        const each = params.deliverEach === true && runs.length > 1;
         // The runs outlive this tool call, so its signal must not stop them.
-        const token = delivery.start();
-        void runAll(
-          plans,
-          runs,
-          limiter,
-          { ...context, signal: undefined },
-          () => registry.changed(),
-        ).then((results) => delivery.deliver(token, { mode, results }));
+        const background = { ...context, signal: undefined };
+        const changed = () => registry.changed();
+        if (each) {
+          // One token per run, so a shutdown cancels every pending result.
+          const tokens = runs.map(() => delivery.start());
+          void runAll(plans, runs, limiter, background, changed, (result, i) =>
+            delivery.deliver(
+              tokens[i],
+              { mode: "single", results: [result] },
+              `Background subagent result (${result.agent}, task ${i + 1} of ${runs.length})`,
+            ),
+          );
+        } else {
+          const token = delivery.start();
+          void runAll(plans, runs, limiter, background, changed).then(
+            (results) => delivery.deliver(token, { mode, results }),
+          );
+        }
         const started = runs.map((run) => run.result);
         return {
-          content: [{ type: "text" as const, text: backgroundText(started) }],
+          content: [
+            { type: "text" as const, text: backgroundText(started, each) },
+          ],
           details: {
             mode,
             background: true,
@@ -1419,13 +1449,13 @@ export default function subagents(
       pending.add(token);
       return token;
     },
-    deliver(token, details) {
+    deliver(token, details, heading = "Background subagent result") {
       pending.delete(token);
       if (token.cancelled) return;
       pi.sendMessage(
         {
           customType: RESULT_MESSAGE_TYPE,
-          content: `Background subagent result:\n\n${combinedText(details)}`,
+          content: `${heading}:\n\n${combinedText(details)}`,
           display: true,
           details,
         },
