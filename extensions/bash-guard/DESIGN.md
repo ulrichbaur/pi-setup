@@ -39,5 +39,7 @@
 - Block operations that belong to the parent session:
   `git commit`, `git pull`, `git push`, and `git stash`.
 - Everything else runs without confirmation.
-  A subagent has no user to ask.
-- The subagents extension reuses this policy in its `safe_bash` tool.
+- The subagents extension reuses this policy in its `safe_bash` tool
+  when no user can answer.
+  When a user can answer, `safe_bash` asks about every command
+  that either policy catches, and a refusal blocks it.

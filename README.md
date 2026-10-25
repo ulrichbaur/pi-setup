@@ -134,8 +134,8 @@ through `xargs`, `find -exec`, `eval`, or wrappers like `nohup` are judged
 like direct ones.
 Interactive sessions can approve or block commands and optionally provide a
 reason when they abort one. Non-interactive sessions fail closed unless
-`bash-guard-auto-allow` is enabled. The subagents extension reuses the
-headless part of this policy in its `safe_bash` tool.
+`bash-guard-auto-allow` is enabled. The subagents extension reuses this
+policy in its `safe_bash` tool.
 
 ### Save Markdown
 
@@ -161,7 +161,13 @@ size limits.
 `extensions/subagents/` adds the `subagent` tool with single and parallel modes.
 It provides scout, researcher, and worker agents in isolated Pi processes.
 The researcher receives only the web tools.
-The worker receives file tools and `safe_bash`, which blocks common destructive system commands.
+The worker receives file tools and `safe_bash`.
+When you can answer, `safe_bash` asks you before any command that bash-guard
+or the headless policy flags. Otherwise it blocks common destructive system
+commands and parent-session Git actions.
+Every agent has `ask_user` to ask you a clarifying question.
+Dialogs from subagents open in your session, one at a time,
+titled with the subagent's session id.
 Agent definitions cannot request the raw `bash` tool.
 The extension depends on the web-fetch and web-search extensions and on the
 shared bash policy in `lib/`. Removing one of them makes the agents that use

@@ -44,14 +44,25 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds).unref());
 }
 
-/**
- * A Pi child process in RPC mode. Commands are matched to their responses by
- * id. Every other stdout record goes to the listeners. Extension dialogs are
- * cancelled because a subagent has no user to ask.
- */
+/** The answer to an extension dialog, without the response envelope. */
+export type DialogAnswer =
+  | { value: string }
+  | { confirmed: boolean }
+  | { cancelled: true };
+
+export const CANCELLED: DialogAnswer = { cancelled: true };
+
+export type DialogHandler = (
+  request: RpcRecord,
+  childExited: AbortSignal,
+) => Promise<DialogAnswer>;
+
+/** Dialogs without a handler, or whose handler fails, get a cancel response. */
 export class RpcChild {
   readonly exited: Promise<number>;
   private readonly child: ChildProcessByStdio<Writable, Readable, Readable>;
+  private readonly onDialog: DialogHandler | undefined;
+  private readonly exitController = new AbortController();
   private readonly listeners = new Set<(record: RpcRecord) => void>();
   private readonly pending = new Map<
     string,
@@ -61,7 +72,13 @@ export class RpcChild {
   private stderrText = "";
   private hasExited = false;
 
-  constructor(command: string, args: string[], cwd: string) {
+  constructor(
+    command: string,
+    args: string[],
+    cwd: string,
+    onDialog?: DialogHandler,
+  ) {
+    this.onDialog = onDialog;
     this.child = spawn(command, args, {
       cwd,
       shell: false,
@@ -82,6 +99,7 @@ export class RpcChild {
       const finish = (code: number) => {
         if (this.hasExited) return;
         this.hasExited = true;
+        this.exitController.abort();
         const detail = this.stderr();
         const error = new Error(
           `Subagent process exited${detail ? `: ${detail}` : ""}`,
@@ -182,12 +200,20 @@ export class RpcChild {
       typeof record.id === "string" &&
       DIALOG_METHODS.has(String(record.method))
     ) {
-      this.write({
-        type: "extension_ui_response",
-        id: record.id,
-        cancelled: true,
-      });
+      this.answerDialog(record.id, record);
     }
     for (const listener of this.listeners) listener(record);
+  }
+
+  private answerDialog(id: string, request: RpcRecord): void {
+    const respond = (answer: DialogAnswer) =>
+      this.write({ type: "extension_ui_response", id, ...answer });
+    if (!this.onDialog) {
+      respond(CANCELLED);
+      return;
+    }
+    this.onDialog(request, this.exitController.signal).then(respond, () =>
+      respond(CANCELLED),
+    );
   }
 }

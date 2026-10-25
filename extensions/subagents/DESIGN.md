@@ -21,11 +21,29 @@
   Retries and compaction can follow `agent_end`.
 - After the run, close stdin.
   Pi then shuts down and finishes writing the session.
-- The child has no user to ask.
-  Every extension dialog request gets a cancel response.
 - On abort, send the `abort` command, then close stdin.
   Signals are only a fallback when the child does not exit.
 - A child that exits before `agent_settled` fails the run and shows its stderr.
+
+## Dialogs
+
+- With a parent UI, a child's `select`, `confirm`, `input`, and `editor` requests
+  open in the parent, titled with the session id.
+  Notifications appear there too; other UI requests are ignored.
+- One dialog is open at a time, across all subagents.
+  A dialog whose child exited, whose run was aborted,
+  or whose timeout passed while it waited is never shown.
+  An open one, except the editor, closes when its child exits
+  or its run is aborted.
+- Without a parent UI, every dialog gets a cancel response.
+- With a parent UI, the parent starts `safe_bash` with `--safe-bash-ask`.
+  The user then decides about every command
+  that the headless or the interactive policy catches.
+  A refusal or a dismissed dialog blocks the command.
+  Without the flag, the headless policy decides alone.
+- Every agent has `ask_user`.
+  Without an answer, the tool tells the agent to continue
+  and state its assumption.
 
 ## Sessions
 

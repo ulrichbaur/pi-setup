@@ -166,6 +166,7 @@ test("child Pi processes run in RPC mode with the agent's settings", () => {
     "openai/gpt-5",
     "high",
     ["--session-dir", "/sessions", "--session-id", "scout-1a2b3c4d"],
+    false,
   );
   assert.deepEqual(args.slice(0, 8), [
     "--mode",
@@ -188,10 +189,18 @@ test("child Pi processes run in RPC mode with the agent's settings", () => {
   ]);
   assert.ok(args.some((arg) => arg.endsWith(join("web-search", "index.ts"))));
   assert.ok(
-    !subagentArguments([], "/tmp/x.md", undefined, "off", []).includes(
+    !subagentArguments([], "/tmp/x.md", undefined, "off", [], false).includes(
       "--thinking",
     ),
   );
+});
+
+test("safe_bash asks the user only when one can answer", () => {
+  const args = (tools: string[], userAvailable: boolean) =>
+    subagentArguments(tools, "/p.md", undefined, undefined, [], userAvailable);
+  assert.ok(args(["safe_bash"], true).includes("--safe-bash-ask"));
+  assert.ok(!args(["safe_bash"], false).includes("--safe-bash-ask"));
+  assert.ok(!args(["read", "ask_user"], true).includes("--safe-bash-ask"));
 });
 
 test("agent names must be usable inside session ids", () => {

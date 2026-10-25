@@ -16,6 +16,12 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { isRecord } from "../../lib/is-record.ts";
+import {
+  createDialogQueue,
+  forwardDialog,
+  forwardNotification,
+  type ParentUI,
+} from "./dialogs.ts";
 import { RpcChild, type RpcRecord } from "./rpc.ts";
 import {
   AGENT_NAME_PATTERN,
@@ -29,6 +35,7 @@ import {
   sessionArguments,
   sessionName,
 } from "./sessions.ts";
+import { ASK_FLAG } from "./tools/safe-bash.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = join(EXTENSION_DIR, "..", "..");
@@ -41,6 +48,7 @@ const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
   safe_bash: join(EXTENSION_DIR, "tools", "safe-bash.ts"),
   web_fetch: join(EXTENSION_DIR, "..", "web-fetch", "index.ts"),
   web_search: join(EXTENSION_DIR, "..", "web-search", "index.ts"),
+  ask_user: join(EXTENSION_DIR, "tools", "ask-user.ts"),
 };
 
 interface AgentModelConfig {
@@ -436,6 +444,7 @@ export function subagentArguments(
   selectedModel: string | undefined,
   thinkingLevel: string | undefined,
   sessionArgs: string[],
+  userAvailable: boolean,
 ): string[] {
   const args = ["--mode", "rpc", ...sessionArgs];
   args.push("--no-skills", "--no-extensions");
@@ -454,6 +463,7 @@ export function subagentArguments(
   if (thinkingLevel && thinkingLevel !== "off") {
     args.push("--thinking", thinkingLevel);
   }
+  if (userAvailable && tools.includes("safe_bash")) args.push(`--${ASK_FLAG}`);
   args.push("--append-system-prompt", systemPromptPath);
   return args;
 }
@@ -528,15 +538,23 @@ export function planRun(
   };
 }
 
+interface RunContext {
+  parentModel: string | undefined;
+  availableModels: ReadonlySet<string>;
+  thinkingLevel: string | undefined;
+  signal: AbortSignal | undefined;
+  // The parent UI, or undefined when no user can answer.
+  ui: ParentUI | undefined;
+  enqueueDialog: <T>(task: () => Promise<T>) => Promise<T>;
+}
+
 async function runAgent(
   plan: RunPlan,
-  parentModel: string | undefined,
-  availableModels: ReadonlySet<string>,
-  thinkingLevel: string | undefined,
-  signal: AbortSignal | undefined,
+  context: RunContext,
   onUpdate?: (result: AgentResult) => void,
 ): Promise<AgentResult> {
   const { agent, task, cwd, target } = plan;
+  const { parentModel, availableModels, thinkingLevel, signal, ui } = context;
   const result = pendingResult(agent.name, task, target.id);
   const selectedModel = selectSubagentModel(
     agent.modelPreferences,
@@ -563,9 +581,23 @@ async function runAgent(
         selectedModel,
         inheritThinkingLevel ? thinkingLevel : undefined,
         sessionArguments(target),
+        ui !== undefined,
       ),
     );
-    const child = new RpcChild(invocation.command, invocation.args, cwd);
+    const child = new RpcChild(
+      invocation.command,
+      invocation.args,
+      cwd,
+      ui &&
+        ((request, childExited) =>
+          forwardDialog(
+            context.enqueueDialog,
+            ui,
+            request,
+            target.id,
+            signal ? AbortSignal.any([signal, childExited]) : childExited,
+          )),
+    );
 
     let settle = () => {};
     const settled = new Promise<void>((resolve) => {
@@ -575,6 +607,13 @@ async function runAgent(
       if (record.type === "agent_settled") {
         settle();
         return;
+      }
+      if (
+        ui &&
+        record.type === "extension_ui_request" &&
+        record.method === "notify"
+      ) {
+        forwardNotification(ui, record, target.id);
       }
       applyEvent(result, record);
       result.progress.durationMs = Date.now() - startedAt;
@@ -764,6 +803,8 @@ const TaskSchema = Type.Object({
 function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
   // Ids of sessions with a live child; one session runs in one child.
   const running = new Set<string>();
+  // Dialogs from all subagents share one queue, so only one is open at a time.
+  const enqueueDialog = createDialogQueue();
   return {
     name: "subagent" as const,
     label: "Subagent",
@@ -820,6 +861,8 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
           getAvailable(): Array<{ provider: string; id: string }>;
         };
         thinkingLevel?: string;
+        hasUI: boolean;
+        ui: ParentUI;
       },
     ) {
       const hasParallel = Boolean(params.tasks?.length);
@@ -890,10 +933,14 @@ function extensionTool(config: SubagentConfig, agents: AgentDefinition[]) {
           async (plan, index) => {
             const result = await runAgent(
               plan,
-              parentModel,
-              availableModels,
-              ctx.thinkingLevel,
-              signal,
+              {
+                parentModel,
+                availableModels,
+                thinkingLevel: ctx.thinkingLevel,
+                signal,
+                ui: ctx.hasUI ? ctx.ui : undefined,
+                enqueueDialog,
+              },
               (current) => {
                 liveResults[index] = current;
                 update();
