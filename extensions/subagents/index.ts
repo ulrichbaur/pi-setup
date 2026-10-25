@@ -125,9 +125,23 @@ export interface AgentResult {
   userMessages?: string[];
 }
 
-interface SubagentDetails {
+export interface SubagentDetails {
   mode: "single" | "parallel";
   results: AgentResult[];
+  // The results are placeholders; the real ones arrive as a message.
+  background?: boolean;
+}
+
+// The custom message that carries a background run's results.
+export const RESULT_MESSAGE_TYPE = "subagent-result";
+
+/**
+ * A token is cancelled when its session shuts down, so a late result never
+ * reaches another session.
+ */
+export interface Delivery {
+  start(): { cancelled: boolean };
+  deliver(token: { cancelled: boolean }, details: SubagentDetails): void;
 }
 
 interface JsonEvent {
@@ -878,6 +892,79 @@ export function resultText(result: AgentResult): string {
   return text;
 }
 
+/** The text the parent model receives for one tool call's runs. */
+export function combinedText(details: SubagentDetails): string {
+  if (details.mode === "single") return resultText(details.results[0]);
+  return details.results
+    .map(
+      (result) =>
+        `## ${result.agent}${result.progress.status === "failed" ? " (FAILED)" : ""}\n\n${resultText(result)}`,
+    )
+    .join("\n\n---\n\n");
+}
+
+function backgroundText(results: AgentResult[]): string {
+  const ids = results.map((result) => result.sessionId).join(", ");
+  return `Started in the background: ${ids}. The result arrives as a message when ${results.length > 1 ? "all of them end" : "the run ends"}. Continue with other work; do not wait or poll for it. The user can follow it with /agents.`;
+}
+
+export function renderDetails(
+  details: SubagentDetails,
+  expanded: boolean,
+  theme: Theme,
+  invalidate: () => void,
+): Container {
+  const container = new Container();
+  if (details.background) {
+    for (const result of details.results) {
+      container.addChild(
+        new Text(
+          `${theme.fg("accent", "⇢")} ${theme.fg("toolTitle", theme.bold(result.agent))} ${theme.fg("dim", `${result.sessionId ?? ""} started in the background`)}`,
+          0,
+          0,
+        ),
+      );
+      container.addChild(
+        new Text(
+          theme.fg(
+            "dim",
+            `Task: ${result.task.replace(/\s+/g, " ").slice(0, 160)}`,
+          ),
+          0,
+          0,
+        ),
+      );
+    }
+    container.addChild(
+      new Text(theme.fg("dim", "Follow it with /agents."), 0, 0),
+    );
+    return container;
+  }
+  if (details.mode === "parallel") {
+    const done = details.results.filter(
+      (item) => item.progress.status === "completed",
+    ).length;
+    container.addChild(
+      new Text(
+        theme.fg(
+          "toolTitle",
+          theme.bold(`parallel ${done}/${details.results.length}`),
+        ),
+        0,
+        0,
+      ),
+    );
+    container.addChild(new Spacer(1));
+  }
+  details.results.forEach((item, index) => {
+    container.addChild(renderAgent(item, expanded, theme, invalidate));
+    if (index < details.results.length - 1) {
+      container.addChild(new Spacer(1));
+    }
+  });
+  return container;
+}
+
 const SESSION_DESCRIPTION =
   "Session id of an earlier subagent run to continue; task is then the follow-up message";
 
@@ -894,10 +981,39 @@ const TaskSchema = Type.Object({
   session: Type.Optional(Type.String({ description: SESSION_DESCRIPTION })),
 });
 
+/**
+ * A run that throws becomes a failed result,
+ * so every run reaches a final status.
+ */
+async function runAll(
+  plans: RunPlan[],
+  runs: SubagentRun[],
+  maxConcurrency: number,
+  context: RunContext,
+  update: () => void,
+): Promise<AgentResult[]> {
+  return mapConcurrent(plans, maxConcurrency, async (plan, index) => {
+    const run = runs[index];
+    try {
+      await runAgent(plan, run, context, update);
+    } catch (error) {
+      run.child = undefined;
+      run.result.live = undefined;
+      run.result.progress.status = "failed";
+      run.result.progress.error =
+        error instanceof Error ? error.message : String(error);
+      run.result.output ||= `Error: ${run.result.progress.error}`;
+    }
+    update();
+    return run.result;
+  });
+}
+
 function extensionTool(
   config: SubagentConfig,
   agents: AgentDefinition[],
   registry: RunRegistry,
+  delivery: Delivery,
 ) {
   // Dialogs from all subagents share one queue, so only one is open at a time.
   const enqueueDialog = createDialogQueue();
@@ -912,6 +1028,7 @@ function extensionTool(
       "Subagents have no parent conversation context, so every subagent task must include all required context.",
       "Use subagent tasks for independent parallel delegations.",
       "To continue an earlier subagent with its context, pass its session id and a follow-up task instead of restating the context.",
+      "Set background: true for long work you do not need right away. The tool returns at once, and the result arrives later as a message; continue with other work and do not poll for it.",
     ],
     parameters: Type.Object({
       agent: Type.Optional(
@@ -933,6 +1050,12 @@ function extensionTool(
       session: Type.Optional(
         Type.String({ description: `${SESSION_DESCRIPTION}, in single mode` }),
       ),
+      background: Type.Optional(
+        Type.Boolean({
+          description:
+            "Return at once and deliver the result later as a message",
+        }),
+      ),
     }),
     async execute(
       _toolCallId: string,
@@ -942,6 +1065,7 @@ function extensionTool(
         tasks?: TaskRequest[];
         cwd?: string;
         session?: string;
+        background?: boolean;
       },
       signal: AbortSignal | undefined,
       onUpdate:
@@ -1025,50 +1149,50 @@ function extensionTool(
       };
 
       for (const run of runs) registry.add(run);
-      try {
-        const results = await mapConcurrent(
+      const context: RunContext = {
+        parentModel,
+        availableModels,
+        thinkingLevel: ctx.thinkingLevel,
+        signal,
+        ui: ctx.hasUI ? ctx.ui : undefined,
+        enqueueDialog,
+      };
+
+      if (params.background) {
+        // The runs outlive this tool call, so its signal must not stop them.
+        const token = delivery.start();
+        void runAll(
           plans,
+          runs,
           config.maxConcurrency,
-          async (plan, index) => {
-            const result = await runAgent(
-              plan,
-              runs[index],
-              {
-                parentModel,
-                availableModels,
-                thinkingLevel: ctx.thinkingLevel,
-                signal,
-                ui: ctx.hasUI ? ctx.ui : undefined,
-                enqueueDialog,
-              },
-              update,
-            );
-            update();
-            return result;
-          },
-        );
-        const text =
-          mode === "single"
-            ? resultText(results[0])
-            : results
-                .map(
-                  (result) =>
-                    `## ${result.agent}${result.progress.status === "failed" ? " (FAILED)" : ""}\n\n${resultText(result)}`,
-                )
-                .join("\n\n---\n\n");
+          { ...context, signal: undefined },
+          () => registry.changed(),
+        ).then((results) => delivery.deliver(token, { mode, results }));
+        const started = runs.map((run) => run.result);
         return {
-          content: [{ type: "text" as const, text }],
-          details: { mode, results } as SubagentDetails,
+          content: [{ type: "text" as const, text: backgroundText(started) }],
+          details: {
+            mode,
+            background: true,
+            results: started.map(({ agent, task, sessionId }) => ({
+              ...pendingResult(agent, task, sessionId ?? ""),
+            })),
+          } as SubagentDetails,
         };
-      } finally {
-        // A run that threw never reached a final status.
-        for (const { result } of runs) {
-          if (["pending", "running"].includes(result.progress.status)) {
-            result.progress.status = "failed";
-          }
-        }
-        registry.changed();
       }
+
+      const results = await runAll(
+        plans,
+        runs,
+        config.maxConcurrency,
+        context,
+        update,
+      );
+      const details: SubagentDetails = { mode, results };
+      return {
+        content: [{ type: "text" as const, text: combinedText(details) }],
+        details,
+      };
     },
     renderCall(
       args: {
@@ -1076,15 +1200,19 @@ function extensionTool(
         task?: string;
         tasks?: TaskRequest[];
         session?: string;
+        background?: boolean;
       },
       theme: {
         bold(text: string): string;
         fg(color: "toolTitle" | "accent" | "dim", text: string): string;
       },
     ) {
+      const background = args.background
+        ? ` ${theme.fg("dim", "(background)")}`
+        : "";
       if (args.tasks?.length) {
         return new Text(
-          `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "parallel")} ${theme.fg("dim", `(${args.tasks.length} tasks)`)}`,
+          `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "parallel")} ${theme.fg("dim", `(${args.tasks.length} tasks)`)}${background}`,
           0,
           0,
         );
@@ -1095,7 +1223,7 @@ function extensionTool(
         ? ` ${theme.fg("dim", `(continues ${args.session})`)}`
         : "";
       return new Text(
-        `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", agent ?? "")}${resume}`,
+        `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", agent ?? "")}${resume}${background}`,
         0,
         0,
       );
@@ -1113,32 +1241,12 @@ function extensionTool(
       if (!details?.results.length) {
         return new Text(result.content[0]?.text ?? "(no output)", 0, 0);
       }
-      const container = new Container();
-      if (details.mode === "parallel") {
-        const done = details.results.filter(
-          (item) => item.progress.status === "completed",
-        ).length;
-        container.addChild(
-          new Text(
-            theme.fg(
-              "toolTitle",
-              theme.bold(`parallel ${done}/${details.results.length}`),
-            ),
-            0,
-            0,
-          ),
-        );
-        container.addChild(new Spacer(1));
-      }
-      details.results.forEach((item, index) => {
-        container.addChild(
-          renderAgent(item, options.expanded, theme, context.invalidate),
-        );
-        if (index < details.results.length - 1) {
-          container.addChild(new Spacer(1));
-        }
-      });
-      return container;
+      return renderDetails(
+        details,
+        options.expanded,
+        theme,
+        context.invalidate,
+      );
     },
   };
 }
@@ -1147,7 +1255,53 @@ export default function subagents(pi: ExtensionAPI): void {
   const config = loadConfig();
   const agents = loadAgents(config);
   const registry = new RunRegistry();
-  pi.registerTool(extensionTool(config, agents, registry));
+  // Tokens of background calls that may still deliver to this session.
+  const pending = new Set<{ cancelled: boolean }>();
+  const delivery: Delivery = {
+    start() {
+      const token = { cancelled: false };
+      pending.add(token);
+      return token;
+    },
+    deliver(token, details) {
+      pending.delete(token);
+      if (token.cancelled) return;
+      pi.sendMessage(
+        {
+          customType: RESULT_MESSAGE_TYPE,
+          content: `Background subagent result:\n\n${combinedText(details)}`,
+          display: true,
+          details,
+        },
+        { triggerTurn: true, deliverAs: "followUp" },
+      );
+    },
+  };
+  pi.registerTool(extensionTool(config, agents, registry, delivery));
+  pi.registerMessageRenderer<SubagentDetails>(
+    RESULT_MESSAGE_TYPE,
+    (message, options, theme) => {
+      const container = new Container();
+      container.addChild(
+        new Text(
+          theme.fg("toolTitle", theme.bold("Background subagent finished")),
+          0,
+          0,
+        ),
+      );
+      if (message.details?.results.length) {
+        container.addChild(
+          renderDetails(message.details, options.expanded, theme, () => {}),
+        );
+      }
+      return container;
+    },
+  );
+  pi.on("session_shutdown", () => {
+    for (const token of pending) token.cancelled = true;
+    pending.clear();
+    for (const run of registry.list()) registry.stop(run);
+  });
 
   pi.registerCommand("agents", {
     description: "Follow this session's subagents, and message or stop them",

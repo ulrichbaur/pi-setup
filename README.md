@@ -179,6 +179,10 @@ The tool result ends with `Session: <id>`.
 Pass that id as `session` with a follow-up `task` to continue the subagent with its earlier context.
 Expanding the tool result shows the subagent's whole conversation,
 live while it runs, with the same components as the main chat.
+With `background: true`, the tool returns at once.
+The result arrives later as a message and starts a model turn,
+or waits for the current one to end.
+Background runs stop when the session closes; their sessions stay saved.
 `/agents` lists this session's subagent runs, even while one runs.
 Open a running subagent to follow it, send it a message
 (Enter steers, Alt+Enter queues a follow-up), or stop it with Ctrl+X.

@@ -1,0 +1,111 @@
+import assert from "node:assert/strict";
+import { join } from "node:path";
+import { test } from "node:test";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import subagents, {
+  RESULT_MESSAGE_TYPE,
+  renderDetails,
+  type SubagentDetails,
+} from "../../../extensions/subagents/index.ts";
+
+const theme = {
+  fg: (_color: string, text: string) => text,
+  bold: (text: string) => text,
+} as unknown as Theme;
+
+// The extension starts children with the script Pi runs from; point it at
+// the fake RPC child.
+process.argv[1] = join(import.meta.dirname, "fake-pi.ts");
+
+type Sent = { message: Record<string, unknown>; options: unknown };
+
+function load() {
+  const sent: Sent[] = [];
+  const handlers: Record<string, () => void> = {};
+  let tool: {
+    execute: (...args: unknown[]) => Promise<{
+      content: Array<{ text: string }>;
+      details: SubagentDetails;
+    }>;
+  };
+  let delivered = () => {};
+  const arrived = new Promise<void>((resolve) => {
+    delivered = resolve;
+  });
+  const pi = {
+    registerTool: (definition: typeof tool) => {
+      tool = definition;
+    },
+    registerCommand: () => {},
+    registerMessageRenderer: () => {},
+    on: (event: string, handler: () => void) => {
+      handlers[event] = handler;
+    },
+    sendMessage: (message: Record<string, unknown>, options: unknown) => {
+      sent.push({ message, options });
+      delivered();
+    },
+  } as unknown as ExtensionAPI;
+  subagents(pi);
+  const ctx = {
+    cwd: process.cwd(),
+    modelRegistry: { getAvailable: () => [] },
+    hasUI: false,
+    ui: {},
+  };
+  const run = (params: Record<string, unknown>) =>
+    tool.execute("call", params, undefined, undefined, ctx);
+  return { run, sent, arrived, handlers };
+}
+
+test("a background run returns at once and delivers its result later", async () => {
+  const { run, sent, arrived } = load();
+  const started = await run({
+    agent: "scout",
+    task: "look around",
+    background: true,
+  });
+  assert.equal(started.details.background, true);
+  assert.equal(started.details.results[0].progress.status, "pending");
+  assert.match(started.content[0].text, /^Started in the background: scout-/);
+  assert.equal(sent.length, 0);
+  const row = renderDetails(started.details, false, theme, () => {})
+    .render(80)
+    .map((line) => line.trim());
+  assert.match(row[0], /^⇢ scout scout-[0-9a-f]{8} started in the background$/);
+  assert.deepEqual(row.slice(1), [
+    "Task: look around",
+    "Follow it with /agents.",
+  ]);
+
+  await arrived;
+  const [{ message, options }] = sent;
+  assert.deepEqual(options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.equal(message.customType, RESULT_MESSAGE_TYPE);
+  assert.equal(message.display, true);
+  assert.ok(
+    String(message.content).startsWith(
+      "Background subagent result:\n\nline same line",
+    ),
+  );
+  const details = message.details as SubagentDetails;
+  assert.equal(details.results[0].progress.status, "completed");
+  assert.equal(details.results[0].live, undefined);
+});
+
+test("a foreground run waits for the child and returns its output", async () => {
+  const { run, sent } = load();
+  const result = await run({ agent: "scout", task: "look around" });
+  assert.equal(result.details.background, undefined);
+  assert.ok(result.content[0].text.startsWith("line same line"));
+  assert.equal(sent.length, 0);
+});
+
+test("results of a shut-down session are never delivered", async () => {
+  const { run, sent, handlers } = load();
+  await run({ agent: "scout", task: "look around", background: true });
+  handlers.session_shutdown();
+  // The fake child answers within a few hundred milliseconds.
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  assert.equal(sent.length, 0);
+});

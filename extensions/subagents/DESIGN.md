@@ -80,6 +80,22 @@
   The other runs of the same tool call continue,
   and the stopped one fails with "Stopped by the user".
 
+## Background
+
+- With `background: true`, the tool returns at once with the session ids.
+  The runs outlive the tool call, so its abort signal does not stop them;
+  `/agents` and session shutdown do.
+- The saved tool result lists which runs started, not their progress.
+  A snapshot would show them running forever after a reload.
+- When all runs of the call end, one custom message carries the results.
+  It starts a turn when the parent is idle
+  and follows the current run when it is busy.
+- A session shutdown stops the background runs
+  and cancels their delivery, so a late result never reaches another session.
+  Their subagent sessions stay saved for a resume.
+- A run that throws becomes a failed result,
+  so every run reaches a final status and the call always delivers.
+
 ## Sessions
 
 - Sessions live in `subagents/sessions` below Pi's agent directory.
