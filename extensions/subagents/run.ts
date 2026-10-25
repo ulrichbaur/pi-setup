@@ -131,6 +131,8 @@ function addUsage(target: UsageStats, value: unknown): void {
 // By call id: a model can run several tools at once.
 const runningTools = new WeakMap<AgentResult, Map<string, ToolEvent>>();
 
+const askedQuestions = new WeakMap<AgentResult, Map<string, string>>();
+
 function showLatestRunningTool(result: AgentResult): void {
   const latest = [...(runningTools.get(result)?.values() ?? [])].at(-1);
   result.progress.currentTool = latest?.tool;
@@ -151,6 +153,18 @@ export function applyEvent(result: AgentResult, record: RpcRecord): void {
       tool: typeof event.toolName === "string" ? event.toolName : "tool",
       args: toolArgsPreview(event.args),
     });
+    if (
+      event.toolName === "ask_parent" &&
+      isRecord(event.args) &&
+      typeof event.args.question === "string"
+    ) {
+      let asked = askedQuestions.get(result);
+      if (!asked) {
+        asked = new Map();
+        askedQuestions.set(result, asked);
+      }
+      asked.set(callId, event.args.question);
+    }
     showLatestRunningTool(result);
     return;
   }
@@ -161,6 +175,11 @@ export function applyEvent(result: AgentResult, record: RpcRecord): void {
       running?.delete(callId);
       result.progress.recentTools.push(tool);
       result.progress.recentTools = result.progress.recentTools.slice(-20);
+    }
+    const question = askedQuestions.get(result)?.get(callId);
+    if (question !== undefined) {
+      askedQuestions.get(result)?.delete(callId);
+      result.question = question;
     }
     showLatestRunningTool(result);
     return;
@@ -176,6 +195,8 @@ export function applyEvent(result: AgentResult, record: RpcRecord): void {
   if (event.message.role !== "assistant") return;
 
   result.usage.turns += 1;
+  // A turn after the question means the run went on without the answer.
+  result.question = undefined;
   addUsage(result.usage, event.message.usage);
   if (typeof event.message.model === "string") {
     result.model = event.message.model;
@@ -319,7 +340,7 @@ export interface RunContext {
   // over the user's work.
   background: boolean;
   registry: RunRegistry;
-  questionTimeoutMs: number;
+  approvalTimeoutMs: number;
 }
 
 /**
@@ -391,7 +412,7 @@ async function runAgent(
         return context.registry.ask(
           run,
           request,
-          context.questionTimeoutMs,
+          context.approvalTimeoutMs,
           AbortSignal.any([signal, childExited]),
         );
       };

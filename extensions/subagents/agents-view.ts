@@ -438,7 +438,9 @@ export class AgentsOverlay implements Component, Focusable {
             const task = run.result.task.replace(/\s+/g, " ");
             const waiting = run.pendingDialogs.length
               ? this.theme.fg("warning", " · waiting for your answer")
-              : "";
+              : run.result.question && !isActive(run)
+                ? this.theme.fg("warning", " · asks the parent")
+                : "";
             return [
               `${marker} ${this.summary(run)}${waiting}`,
               `    ${this.theme.fg("muted", truncateToWidth(task, Math.max(1, width - 4)))}`,

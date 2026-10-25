@@ -124,6 +124,15 @@ function addFooter(
       ),
     );
   }
+  if (result.question) {
+    container.addChild(
+      new Text(
+        theme.fg("warning", `? Asks the parent: ${result.question}`),
+        0,
+        0,
+      ),
+    );
+  }
   if (showSession && result.sessionFile) {
     container.addChild(
       new Text(theme.fg("dim", `Session: ${result.sessionFile}`), 0, 0),
@@ -143,7 +152,10 @@ function addFooter(
 
 /** The text the parent model receives for one subagent run. */
 export function resultText(result: AgentResult): string {
-  let text = result.output || "(no output)";
+  let text = result.output || (result.question ? "" : "(no output)");
+  if (result.question) {
+    text += `${text ? "\n\n" : ""}The subagent asks: ${result.question}\nAnswer it by continuing the subagent: call subagent with session ${result.sessionId} and your answer as the task.`;
+  }
   if (result.userMessages?.length) {
     const messages = result.userMessages.map((message) => `- ${message}`);
     text += `\n\nThe user sent the subagent these messages while it ran:\n${messages.join("\n")}`;

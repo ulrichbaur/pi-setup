@@ -88,7 +88,7 @@ test("safe_bash asks the user only when one can answer", () => {
     subagentArguments(tools, "/p.md", undefined, undefined, [], userAvailable);
   assert.ok(args(["safe_bash"], true).includes("--safe-bash-ask"));
   assert.ok(!args(["safe_bash"], false).includes("--safe-bash-ask"));
-  assert.ok(!args(["read", "ask_user"], true).includes("--safe-bash-ask"));
+  assert.ok(!args(["read", "ask_parent"], true).includes("--safe-bash-ask"));
 });
 
 const AGENTS = [
@@ -277,4 +277,51 @@ test("a settled run survives a forced stop; other failures do not", () => {
   assert.equal(finalStatus(1, false, true, undefined), "failed");
   assert.equal(finalStatus(1, true, false, undefined), "failed");
   assert.equal(finalStatus(0, true, false, "fetch failed"), "failed");
+});
+
+test("a question to the parent counts only when the run ends with it", () => {
+  const result: Parameters<typeof applyEvent>[0] = {
+    agent: "scout",
+    task: "t",
+    output: "",
+    exitCode: -1,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+      turns: 0,
+    },
+    progress: {
+      status: "running",
+      recentTools: [],
+      toolCount: 0,
+      durationMs: 0,
+      lastMessage: "",
+    },
+  };
+  const ask = (id: string, question: string) => {
+    applyEvent(result, {
+      type: "tool_execution_start",
+      toolCallId: id,
+      toolName: "ask_parent",
+      args: { question },
+    });
+    applyEvent(result, { type: "tool_execution_end", toolCallId: id });
+  };
+
+  ask("a", "Which database?");
+  assert.equal(result.question, "Which database?");
+  applyEvent(result, {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: "Picked Postgres.",
+      stopReason: "stop",
+    },
+  });
+  assert.equal(result.question, undefined);
+  ask("b", "Which port?");
+  assert.equal(result.question, "Which port?");
 });

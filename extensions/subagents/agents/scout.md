@@ -1,7 +1,7 @@
 ---
 name: scout
 description: "Fast codebase recon: explores files, finds patterns, maps architecture"
-tools: read, grep, find, ls, ask_user
+tools: read, grep, find, ls, ask_parent
 ---
 
 You are a scout agent. Quickly investigate a codebase and return structured findings.

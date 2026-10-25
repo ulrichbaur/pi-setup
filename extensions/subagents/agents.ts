@@ -15,7 +15,7 @@ export const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
   safe_bash: join(EXTENSION_DIR, "tools", "safe-bash.ts"),
   web_fetch: join(EXTENSION_DIR, "..", "web-fetch", "index.ts"),
   web_search: join(EXTENSION_DIR, "..", "web-search", "index.ts"),
-  ask_user: join(EXTENSION_DIR, "tools", "ask-user.ts"),
+  ask_parent: join(EXTENSION_DIR, "tools", "ask-parent.ts"),
 };
 
 function parseTools(value: unknown): string[] {

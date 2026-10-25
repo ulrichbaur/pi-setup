@@ -73,6 +73,7 @@ export function extensionTool(
       "Subagents have no parent conversation context, so every subagent task must include all required context.",
       "Use subagent tasks for independent parallel delegations.",
       "To continue an earlier subagent with its context, pass its session id and a follow-up task instead of restating the context.",
+      "When a subagent result ends with a question, answer it yourself by continuing that subagent with its session id and your answer as the task. Ask the user only when you cannot answer it.",
       "Set background: true for long work you do not need right away. The tool returns at once, and the result arrives later as a message; continue with other work and do not poll for it.",
       "With several background tasks whose results are useful on their own, set deliverEach: true to get each result as soon as its run ends.",
     ],
@@ -217,7 +218,7 @@ export function extensionTool(
         enqueueDialog,
         background: params.background === true,
         registry,
-        questionTimeoutMs: config.backgroundQuestionTimeoutMinutes * 60_000,
+        approvalTimeoutMs: config.backgroundApprovalTimeoutMinutes * 60_000,
       };
 
       if (params.background) {

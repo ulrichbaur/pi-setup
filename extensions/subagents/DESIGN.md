@@ -55,8 +55,8 @@
   open in the parent, titled with the session id.
   Notifications appear there too; other UI requests are ignored.
 - A background run opens no dialog over the user's work.
-  Its requests wait in `/agents`, marked on the run, and the user gets a notice.
-  A request is cancelled after `backgroundQuestionTimeoutMinutes` (default 10),
+  Its approvals wait in `/agents`, marked on the run, and the user gets a notice.
+  An approval is cancelled after `backgroundApprovalTimeoutMinutes` (default 10),
   after the child's own timeout, or when the run stops.
 - One dialog is open at a time, across all subagents.
   A dialog whose child exited, whose run was aborted,
@@ -72,9 +72,15 @@
   its kind, meaning its set of reasons, for the rest of the run.
   Commands the headless policy blocks are asked about every time.
   Without the flag, the headless policy decides alone.
-- Every agent has `ask_user`.
-  Without an answer, the tool tells the agent to continue
-  and state its assumption.
+- Subagents do not ask the user questions.
+  `ask_parent` ends the run with `terminate: true`, so the question
+  is the run's last word, and the result tells the parent model
+  to answer by continuing the session.
+  A later assistant turn clears the question,
+  because the run went on without the answer.
+- Only `safe_bash` approvals reach the user,
+  because a model approving its subagent's risky commands
+  is a weaker check than a person.
 
 ## Transcript
 

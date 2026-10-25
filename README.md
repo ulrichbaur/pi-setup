@@ -171,8 +171,10 @@ or the headless policy flags. For milder commands, such as deleting a single
 file, you can allow that kind of command for the rest of the run.
 Otherwise it blocks common destructive system commands and parent-session
 Git actions.
-Every agent has `ask_user` to ask you a clarifying question.
-Dialogs from subagents open in your session, one at a time,
+Subagents never ask you questions. An agent that needs an answer calls
+`ask_parent`: its run ends with the question, and the parent model answers
+by continuing the subagent's session, asking you only when it cannot.
+Approval dialogs from `safe_bash` open in your session, one at a time,
 titled with the subagent's session id.
 Agent definitions cannot request the raw `bash` tool.
 The extension depends on the web-fetch and web-search extensions and on the
@@ -192,9 +194,8 @@ With several tasks, `deliverEach: true` delivers each result
 as soon as its own run ends instead of all together.
 Background runs stop when the session closes; their sessions stay saved.
 A background run never opens a dialog over your work.
-Its questions and approvals wait in `/agents`, and you get a notice.
-An unanswered one is cancelled after 10 minutes:
-`safe_bash` then blocks the command, and `ask_user` reports no answer.
+Its approvals wait in `/agents`, and you get a notice.
+An unanswered one is cancelled after 10 minutes, and `safe_bash` blocks the command.
 `/agents` lists this session's subagent runs, even while one runs.
 Press Tab there to browse saved subagent sessions from earlier work.
 Open a running subagent to follow it, send it a message
@@ -210,7 +211,7 @@ The optional config lives in `~/.pi/agent/subagents.json` (or below
 `PI_CODING_AGENT_DIR` when set) and overrides the built-in defaults:
 at most 4 subagents running at once across the session,
 at most 8 parallel tasks in one call, sessions kept for 90 days,
-background questions cancelled after 10 minutes, and no model preferences.
+background approvals cancelled after 10 minutes, and no model preferences.
 Older sessions are deleted when Pi starts.
 Each agent may set a `models` array of `provider/model` IDs.
 The first available preferred model is selected. An agent without an available
@@ -223,7 +224,7 @@ is an error.
   "maxConcurrency": 4,
   "maxParallelTasks": 8,
   "sessionRetentionDays": 90,
-  "backgroundQuestionTimeoutMinutes": 10,
+  "backgroundApprovalTimeoutMinutes": 10,
   "agents": {
     "worker": {
       "models": ["provider/model-id", "other-provider/fallback-model"]

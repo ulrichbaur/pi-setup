@@ -57,6 +57,8 @@ export interface AgentResult {
   // Present only while the run streams; the saved result reads the file.
   live?: LiveTranscript;
   userMessages?: string[];
+  // The question the subagent asked its parent when its run ended.
+  question?: string;
   // Where a user or project agent came from; absent for package agents.
   agentSource?: "user" | "project";
 }
