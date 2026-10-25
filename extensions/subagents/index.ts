@@ -48,7 +48,11 @@ import {
   emptyTranscript,
   type LiveTranscript,
 } from "./transcript.ts";
-import { releaseTranscript, transcriptView } from "./transcript-view.ts";
+import {
+  releaseTranscript,
+  type TranscriptDisplay,
+  transcriptView,
+} from "./transcript-view.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = join(EXTENSION_DIR, "..", "..");
@@ -840,7 +844,7 @@ function renderAgent(
   result: AgentResult,
   expanded: boolean,
   theme: Theme,
-  invalidate: () => void,
+  display: TranscriptDisplay,
 ): Container {
   const container = new Container();
   const icon =
@@ -867,7 +871,7 @@ function renderAgent(
     let transcript: Container | undefined;
     let unavailable: string | undefined;
     try {
-      transcript = transcriptView(result, invalidate);
+      transcript = transcriptView(result, display);
     } catch (error) {
       unavailable = error instanceof Error ? error.message : String(error);
     }
@@ -989,7 +993,7 @@ export function renderDetails(
   details: SubagentDetails,
   expanded: boolean,
   theme: Theme,
-  invalidate: () => void,
+  display: TranscriptDisplay,
 ): Container {
   const container = new Container();
   if (details.background) {
@@ -1034,7 +1038,7 @@ export function renderDetails(
     container.addChild(new Spacer(1));
   }
   details.results.forEach((item, index) => {
-    container.addChild(renderAgent(item, expanded, theme, invalidate));
+    container.addChild(renderAgent(item, expanded, theme, display));
     if (index < details.results.length - 1) {
       container.addChild(new Spacer(1));
     }
@@ -1105,6 +1109,7 @@ function extensionTool(
   agents: AgentDefinition[],
   registry: RunRegistry,
   delivery: Delivery,
+  hideThinking: () => boolean,
 ) {
   // One limit for every run of this session, background runs included.
   const limiter = new Limiter(config.maxConcurrency);
@@ -1332,12 +1337,10 @@ function extensionTool(
       if (!details?.results.length) {
         return new Text(result.content[0]?.text ?? "(no output)", 0, 0);
       }
-      return renderDetails(
-        details,
-        options.expanded,
-        theme,
-        context.invalidate,
-      );
+      return renderDetails(details, options.expanded, theme, {
+        invalidate: context.invalidate,
+        hideThinking: hideThinking(),
+      });
     },
   };
 }
@@ -1370,7 +1373,11 @@ export default function subagents(
       );
     },
   };
-  pi.registerTool(extensionTool(config, agents, registry, delivery));
+  // Follows the user's setting, which the TUI also changes at runtime.
+  const hideThinking = () => pi.getSettings().hideThinkingBlock === true;
+  pi.registerTool(
+    extensionTool(config, agents, registry, delivery, hideThinking),
+  );
   pi.registerMessageRenderer<SubagentDetails>(
     RESULT_MESSAGE_TYPE,
     (message, options, theme) => {
@@ -1384,7 +1391,10 @@ export default function subagents(
       );
       if (message.details?.results.length) {
         container.addChild(
-          renderDetails(message.details, options.expanded, theme, () => {}),
+          renderDetails(message.details, options.expanded, theme, {
+            invalidate: () => {},
+            hideThinking: hideThinking(),
+          }),
         );
       }
       return container;
@@ -1442,7 +1452,7 @@ export default function subagents(
       }
       const choice = await ctx.ui.custom<OverlayChoice>(
         (tui, theme, _keybindings, done) =>
-          new AgentsOverlay(tui, theme, registry, done),
+          new AgentsOverlay(tui, theme, registry, done, hideThinking),
         {
           overlay: true,
           overlayOptions: {

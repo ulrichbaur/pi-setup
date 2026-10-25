@@ -101,3 +101,29 @@ test("a tool call of an aborted message shows why it has no result", () => {
   );
   assert.ok(lines.includes("Operation aborted"), lines.join("\n"));
 });
+
+test("thinking blocks follow the setting, also on cached messages", () => {
+  const messages: TranscriptMessage[] = [
+    {
+      role: "assistant",
+      stopReason: "stop",
+      content: [
+        { type: "thinking", thinking: "Weighing the options" },
+        { type: "text", text: "Use Postgres." },
+      ],
+    },
+  ];
+  const render = (hideThinking: boolean) =>
+    plain(
+      renderTranscript(messages, {
+        cwd: "/repo",
+        invalidate: () => {},
+        hideThinking,
+      }).render(80),
+    ).join("\n");
+
+  assert.match(render(false), /Weighing the options/);
+  assert.doesNotMatch(render(true), /Weighing the options/);
+  assert.match(render(true), /Use Postgres\./);
+  assert.match(render(false), /Weighing the options/);
+});

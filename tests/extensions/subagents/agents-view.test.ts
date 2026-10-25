@@ -41,10 +41,16 @@ function setup() {
   } as unknown as TUI;
   let closed = false;
   let choice: OverlayChoice;
-  const overlay = new AgentsOverlay(tui, theme, registry, (chosen) => {
-    closed = true;
-    choice = chosen;
-  });
+  const overlay = new AgentsOverlay(
+    tui,
+    theme,
+    registry,
+    (chosen) => {
+      closed = true;
+      choice = chosen;
+    },
+    () => false,
+  );
   overlay.focused = true;
   const type = (text: string) => {
     for (const character of text) overlay.handleInput(character);

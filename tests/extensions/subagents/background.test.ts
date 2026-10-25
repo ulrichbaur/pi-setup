@@ -86,7 +86,10 @@ test("a background run returns at once and delivers its result later", async () 
   assert.equal(started.details.results[0].progress.status, "pending");
   assert.match(started.content[0].text, /^Started in the background: scout-/);
   assert.equal(sent.length, 0);
-  const row = renderDetails(started.details, false, theme, () => {})
+  const row = renderDetails(started.details, false, theme, {
+    invalidate: () => {},
+    hideThinking: false,
+  })
     .render(80)
     .map((line) => line.trim());
   assert.match(row[0], /^⇢ scout scout-[0-9a-f]{8} started in the background$/);

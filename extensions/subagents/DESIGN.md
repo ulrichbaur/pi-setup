@@ -60,6 +60,8 @@
 - The collapsed result shows recent tools and the last message.
 - The expanded result shows the run's conversation
   with the components of Pi's main chat.
+  Thinking blocks follow the user's `hideThinkingBlock` setting,
+  read at each render, so a toggle applies at once.
 - While a run streams, the transcript is built from RPC events
   and lives only in memory.
 - The saved result keeps the session file and the run's range of message

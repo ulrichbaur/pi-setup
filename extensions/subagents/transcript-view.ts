@@ -33,8 +33,14 @@ const TOOL_RENDERERS: Record<string, (cwd: string) => AnyToolDefinition> = {
   safe_bash: createBashToolDefinition,
 };
 
+export interface TranscriptDisplay {
+  invalidate: () => void;
+  hideThinking: boolean;
+}
+
 export interface TranscriptViewOptions {
   cwd: string;
+  hideThinking?: boolean;
   streaming?: TranscriptMessage;
   pendingResults?: Record<string, PendingToolResult>;
   invalidate: () => void;
@@ -54,6 +60,7 @@ interface CachedMessage {
   // until a final result arrives.
   running: Set<string>;
   redraw: { invalidate: () => void };
+  hideThinking: boolean;
 }
 const cache = new WeakMap<TranscriptMessage, CachedMessage>();
 
@@ -84,13 +91,14 @@ function cachedMessage(
   message: TranscriptMessage,
   options: TranscriptViewOptions,
 ): CachedMessage {
+  const hideThinking = options.hideThinking === true;
   let entry = cache.get(message);
   if (!entry) {
     const component =
       message.role === "assistant"
         ? new AssistantMessageComponent(
             message as never,
-            false,
+            hideThinking,
             getMarkdownTheme(),
           )
         : new UserMessageComponent(text(message.content), getMarkdownTheme());
@@ -99,8 +107,16 @@ function cachedMessage(
       tools: new Map(),
       running: new Set(),
       redraw: { invalidate: options.invalidate },
+      hideThinking,
     };
     cache.set(message, entry);
+  }
+  if (
+    entry.hideThinking !== hideThinking &&
+    entry.component instanceof AssistantMessageComponent
+  ) {
+    entry.component.setHideThinkingBlock(hideThinking);
+    entry.hideThinking = hideThinking;
   }
   entry.redraw.invalidate = options.invalidate;
   return entry;
@@ -227,7 +243,7 @@ export function releaseTranscript(
 
 export function transcriptView(
   result: AgentResult,
-  invalidate: () => void,
+  display: TranscriptDisplay,
 ): Container | undefined {
   const cwd = result.cwd ?? process.cwd();
   if (result.live) {
@@ -235,7 +251,7 @@ export function transcriptView(
       cwd,
       streaming: result.live.streaming,
       pendingResults: result.live.pendingResults,
-      invalidate,
+      ...display,
     });
   }
   if (!result.sessionFile || result.messageEnd === undefined) return undefined;
@@ -245,6 +261,6 @@ export function transcriptView(
       result.messageStart ?? 0,
       result.messageEnd,
     ),
-    { cwd, invalidate },
+    { cwd, ...display },
   );
 }

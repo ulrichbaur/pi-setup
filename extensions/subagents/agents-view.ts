@@ -66,17 +66,20 @@ export class AgentsOverlay implements Component, Focusable {
   private readonly theme: Theme;
   private readonly registry: RunRegistry;
   private readonly done: (choice: OverlayChoice) => void;
+  private readonly hideThinking: () => boolean;
 
   constructor(
     tui: TUI,
     theme: Theme,
     registry: RunRegistry,
     done: (choice: OverlayChoice) => void,
+    hideThinking: () => boolean,
   ) {
     this.tui = tui;
     this.theme = theme;
     this.registry = registry;
     this.done = done;
+    this.hideThinking = hideThinking;
     this.border = new DynamicBorder((text: string) => theme.fg("accent", text));
     this.separator = new DynamicBorder((text: string) =>
       theme.fg("borderMuted", text),
@@ -381,9 +384,10 @@ export class AgentsOverlay implements Component, Focusable {
     const header = [` ${this.summary(run)}`];
     let lines: string[];
     try {
-      const transcript = transcriptView(run.result, () =>
-        this.tui.requestRender(),
-      );
+      const transcript = transcriptView(run.result, {
+        invalidate: () => this.tui.requestRender(),
+        hideThinking: this.hideThinking(),
+      });
       lines = transcript
         ? transcript.render(width)
         : (run.result.output || "(no output yet)")
