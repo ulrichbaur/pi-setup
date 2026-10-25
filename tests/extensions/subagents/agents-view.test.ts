@@ -295,3 +295,26 @@ test("Tab lists saved sessions to view and open", async () => {
     saved = [];
   });
 });
+
+test("a multi-line question title keeps one line per row", async () => {
+  const { registry, overlay, screen } = setup();
+  const run = fakeRun("worker-00000001");
+  registry.add(run);
+  const answer = registry.ask(
+    run,
+    {
+      method: "select",
+      title: "Run this command?\n• rm deletes files\n\nCommand:\nrm a.txt",
+      options: ["Run once", "Allow this kind for this run", "Block"],
+    },
+    60_000,
+    new AbortController().signal,
+  );
+  overlay.handleInput(KEYS.enter);
+  const lines = screen().split("\n");
+  assert.ok(lines.some((line) => line === " ? Run this command?"));
+  assert.ok(lines.some((line) => line.trim() === "rm a.txt"));
+  overlay.handleInput(KEYS.down);
+  overlay.handleInput(KEYS.enter);
+  assert.deepEqual(await answer, { value: "Allow this kind for this run" });
+});

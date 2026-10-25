@@ -43,3 +43,5 @@
   when no user can answer.
   When a user can answer, `safe_bash` asks about every command
   that either policy catches, and a refusal blocks it.
+  A command this policy allows can be allowed by kind for the rest of the run;
+  a command it blocks is asked about every time.

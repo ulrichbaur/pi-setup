@@ -602,9 +602,9 @@ export class AgentsOverlay implements Component, Focusable {
       );
     }
     if (question) {
-      footer.push(
-        this.theme.fg("warning", ` ? ${text(question.request.title)}`),
-      );
+      const [first = "", ...rest] = text(question.request.title).split("\n");
+      footer.push(this.theme.fg("warning", ` ? ${first}`));
+      footer.push(...rest.map((line) => `   ${line}`));
       const message = text(question.request.message);
       if (message) {
         footer.push(...message.split("\n").map((line) => `   ${line}`));

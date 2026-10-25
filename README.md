@@ -164,8 +164,10 @@ It provides scout, researcher, and worker agents in isolated Pi processes.
 The researcher receives only the web tools.
 The worker receives file tools and `safe_bash`.
 When you can answer, `safe_bash` asks you before any command that bash-guard
-or the headless policy flags. Otherwise it blocks common destructive system
-commands and parent-session Git actions.
+or the headless policy flags. For milder commands, such as deleting a single
+file, you can allow that kind of command for the rest of the run.
+Otherwise it blocks common destructive system commands and parent-session
+Git actions.
 Every agent has `ask_user` to ask you a clarifying question.
 Dialogs from subagents open in your session, one at a time,
 titled with the subagent's session id.

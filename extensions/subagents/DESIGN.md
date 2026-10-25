@@ -50,6 +50,9 @@
   The user then decides about every command
   that the headless or the interactive policy catches.
   A refusal or a dismissed dialog blocks the command.
+  For a command the headless policy allows, the user can also allow
+  its kind, meaning its set of reasons, for the rest of the run.
+  Commands the headless policy blocks are asked about every time.
   Without the flag, the headless policy decides alone.
 - Every agent has `ask_user`.
   Without an answer, the tool tells the agent to continue
