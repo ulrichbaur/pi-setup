@@ -15,6 +15,16 @@ function savedResults(details: unknown): AgentResult[] {
   );
 }
 
+/** Identifies one run's result, saved or live, without object identity. */
+export function resultKey(result: AgentResult): string {
+  return [
+    result.agent,
+    result.sessionId,
+    result.messageStart,
+    result.messageEnd,
+  ].join(":");
+}
+
 function finishedRun(result: AgentResult): SubagentRun {
   return { result, stop: new AbortController(), pendingDialogs: [] };
 }

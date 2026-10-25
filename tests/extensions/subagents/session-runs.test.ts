@@ -26,6 +26,7 @@ type Handler = (event: unknown, ctx: unknown) => void;
 function load() {
   const registry = new RunRegistry();
   const handlers: Record<string, Handler> = {};
+  const costs: unknown[] = [];
   let tool: {
     execute: (...args: unknown[]) => Promise<unknown>;
   };
@@ -36,6 +37,10 @@ function load() {
       },
       registerCommand: () => {},
       registerMessageRenderer: () => {},
+      events: {
+        emit: (channel: string, data: unknown) => costs.push([channel, data]),
+        on: () => () => {},
+      },
       on: (event: string, handler: Handler) => {
         handlers[event] = handler;
       },
@@ -51,7 +56,7 @@ function load() {
   };
   const run = (params: Record<string, unknown>) =>
     tool.execute("call", params, undefined, undefined, ctx);
-  return { registry, handlers, run };
+  return { registry, handlers, run, costs };
 }
 
 const until = async (condition: () => boolean) => {
@@ -127,4 +132,77 @@ test("a session start rebuilds the list from the saved results", () => {
     registry.list().map((run) => run.result.sessionId),
     ["worker-00000002", "scout-00000001"],
   );
+});
+
+test("the subagent cost total covers saved and running runs", () => {
+  const { registry, handlers, costs } = load();
+  const lastCost = () => {
+    const [channel, data] = costs.at(-1) as [string, { cost: number }];
+    assert.equal(channel, "subagents:cost");
+    return data.cost;
+  };
+  const near = (actual: number, expected: number) =>
+    assert.ok(Math.abs(actual - expected) < 1e-12, `${actual} != ${expected}`);
+  const saved = fakeRun("scout-00000001", "completed").result;
+  saved.usage.cost = 0.02;
+  const delivered = fakeRun("worker-00000002", "completed").result;
+  delivered.usage.cost = 0.005;
+  const savedToolResult = {
+    type: "message",
+    message: {
+      role: "toolResult",
+      toolName: "subagent",
+      details: { mode: "single", results: [saved] },
+    },
+  };
+  const branch: unknown[] = [savedToolResult];
+  const ctx = {
+    sessionManager: { getBranch: () => branch },
+    ui: { notify: () => {} },
+  };
+  handlers.session_start({}, ctx);
+  near(lastCost(), 0.02);
+
+  const running = fakeRun("scout-00000003");
+  running.result.usage.cost = 0.001;
+  registry.add(running);
+  near(lastCost(), 0.021);
+  const emitted = costs.length;
+  registry.changed();
+  assert.equal(costs.length, emitted);
+
+  // A finished run still counts before Pi saves its result.
+  running.result.progress.status = "completed";
+  registry.changed();
+  assert.equal(costs.length, emitted);
+  handlers.message_end(
+    {
+      message: {
+        role: "toolResult",
+        toolName: "subagent",
+        details: { mode: "single", results: [running.result] },
+      },
+    },
+    ctx,
+  );
+  assert.equal(costs.length, emitted);
+
+  // A delivered result counts once, saved or pending.
+  const deliveredEntry = {
+    type: "custom_message",
+    customType: RESULT_MESSAGE_TYPE,
+    details: { mode: "single", results: [delivered] },
+  };
+  branch.push(deliveredEntry);
+  handlers.message_end(
+    {
+      message: {
+        role: "custom",
+        customType: RESULT_MESSAGE_TYPE,
+        details: deliveredEntry.details,
+      },
+    },
+    ctx,
+  );
+  near(lastCost(), 0.026);
 });

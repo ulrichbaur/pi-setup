@@ -54,6 +54,7 @@ function load(ui?: Record<string, unknown>) {
     },
     registerCommand: () => {},
     registerMessageRenderer: () => {},
+    events: { emit: () => {}, on: () => () => {} },
     on: (event: string, handler: () => void) => {
       handlers[event] = handler;
     },

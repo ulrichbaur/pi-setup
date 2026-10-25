@@ -11,6 +11,7 @@ import {
   type TUI,
   truncateToWidth,
 } from "@earendil-works/pi-tui";
+import { formatCost } from "../../lib/subagent-cost.ts";
 import { CANCELLED } from "./rpc.ts";
 import type {
   MessageMode,
@@ -384,7 +385,7 @@ export class AgentsOverlay implements Component, Focusable {
     const { result } = run;
     return `${this.statusIcon(run)} ${this.theme.bold(result.agent)} ${this.theme.fg(
       "dim",
-      `${result.sessionId ?? ""} · ${result.progress.status} · ${result.progress.toolCount} tools · ${formatDuration(result.progress.durationMs)}`,
+      `${result.sessionId ?? ""} · ${result.progress.status} · ${result.progress.toolCount} tools · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}`,
     )}`;
   }
 

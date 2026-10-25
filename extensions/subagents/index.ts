@@ -16,6 +16,11 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { isRecord } from "../../lib/is-record.ts";
+import {
+  formatCost,
+  SUBAGENT_COST_CHANNEL,
+  type SubagentCostEvent,
+} from "../../lib/subagent-cost.ts";
 import { AgentsOverlay, type OverlayChoice } from "./agents-view.ts";
 import {
   createDialogQueue,
@@ -25,7 +30,7 @@ import {
 } from "./dialogs.ts";
 import { Limiter } from "./limiter.ts";
 import { openSubagentSession, returnToParent } from "./navigation.ts";
-import { savedRuns } from "./restore.ts";
+import { resultKey, savedRuns } from "./restore.ts";
 import { type DialogHandler, RpcChild, type RpcRecord } from "./rpc.ts";
 import { RunRegistry, type SubagentRun } from "./runs.ts";
 import {
@@ -860,7 +865,7 @@ function renderAgent(
   const tokens = result.usage.input + result.usage.output;
   container.addChild(
     new Text(
-      `${icon} ${theme.fg("toolTitle", theme.bold(result.agent))} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}${result.sessionId ? ` · ${result.sessionId}` : ""}`)}`,
+      `${icon} ${theme.fg("toolTitle", theme.bold(result.agent))} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}${result.sessionId ? ` · ${result.sessionId}` : ""}`)}`,
       0,
       0,
     ),
@@ -1476,16 +1481,65 @@ export default function subagents(
     },
   });
 
+  let savedCost = 0;
+  let savedKeys = new Set<string>();
+  let reportedCost: number | undefined;
+  const reportCost = () => {
+    const unsaved = registry
+      .list()
+      .filter((run) => !savedKeys.has(resultKey(run.result)))
+      .reduce((sum, run) => sum + run.result.usage.cost, 0);
+    const cost = savedCost + unsaved;
+    if (cost === reportedCost) return;
+    reportedCost = cost;
+    pi.events.emit(SUBAGENT_COST_CHANNEL, { cost } satisfies SubagentCostEvent);
+  };
+  const branchRuns = (entries: readonly unknown[]) => {
+    const runs = savedRuns(entries, RESULT_MESSAGE_TYPE);
+    // A result can appear twice when a message is both saved and pending.
+    const costs = new Map(
+      runs.map((run) => [resultKey(run.result), run.result.usage.cost]),
+    );
+    savedKeys = new Set(costs.keys());
+    savedCost = [...costs.values()].reduce((sum, cost) => sum + cost, 0);
+    reportCost();
+    return runs;
+  };
+  registry.subscribe(reportCost);
+  pi.on("session_tree", (_event, ctx) => {
+    branchRuns(ctx.sessionManager.getBranch());
+  });
+  pi.on("message_end", (event, ctx) => {
+    const message = event.message as {
+      role?: string;
+      toolName?: string;
+      customType?: string;
+      details?: unknown;
+    };
+    // Pi saves a message after extensions see its message_end, so the
+    // message joins the saved entries here.
+    let entry: unknown;
+    if (message.role === "toolResult" && message.toolName === "subagent") {
+      entry = { type: "message", message };
+    } else if (
+      message.role === "custom" &&
+      message.customType === RESULT_MESSAGE_TYPE
+    ) {
+      entry = {
+        type: "custom_message",
+        customType: message.customType,
+        details: message.details,
+      };
+    }
+    if (entry) branchRuns([...ctx.sessionManager.getBranch(), entry]);
+  });
+
   let pruned = false;
   pi.on("session_start", (_event, ctx) => {
+    const runs = branchRuns(ctx.sessionManager.getBranch());
     // A reload or a session switch starts with an empty registry.
     if (registry.list().length === 0) {
-      for (const run of savedRuns(
-        ctx.sessionManager.getBranch(),
-        RESULT_MESSAGE_TYPE,
-      )) {
-        registry.add(run);
-      }
+      for (const run of runs) registry.add(run);
     }
     if (pruned) return;
     pruned = true;

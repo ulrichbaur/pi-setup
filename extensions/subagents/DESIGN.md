@@ -122,6 +122,20 @@
 - A run that throws becomes a failed result,
   so every run reaches a final status and the call always delivers.
 
+## Cost
+
+- Each result header and each `/agents` row shows the run's cost.
+- The extension reports the total on the event bus channel
+  `subagents:cost`, defined in `lib/subagent-cost.ts`.
+  Other extensions only listen; none imports this one.
+- The total is the saved results on the current branch,
+  plus every run of this runtime whose result is not saved yet.
+  A finished run therefore counts before Pi saves its result.
+- Pi shows extensions a message before it saves it,
+  so a subagent result counts from its `message_end` on.
+  Results count once, matched by agent, session id, and message range.
+- The total is reported only when it changes.
+
 ## Opening a session
 
 - `/agents open <id>`, or Ctrl+O in the overlay,

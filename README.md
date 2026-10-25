@@ -192,6 +192,7 @@ Press Tab there to browse saved subagent sessions from earlier work.
 Open a running subagent to follow it, send it a message
 (Enter steers, Alt+Enter queues a follow-up), or stop it with Ctrl+X.
 The parent model sees the messages you sent.
+Each result and each `/agents` row shows what the run cost.
 To work in a subagent session yourself, run `/agents open <id>`
 or press Ctrl+O in `/agents`. It runs with your normal tools and extensions.
 `/agents back` returns to the parent session and leaves the parent model
