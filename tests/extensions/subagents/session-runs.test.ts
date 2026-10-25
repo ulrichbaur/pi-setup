@@ -15,10 +15,11 @@ writeFileSync(
 );
 process.env.PI_CODING_AGENT_DIR = agentDir;
 process.argv[1] = join(import.meta.dirname, "fake-pi.ts");
-const { default: subagents } = await import(
+const { default: subagents, RESULT_MESSAGE_TYPE } = await import(
   "../../../extensions/subagents/index.ts"
 );
 const { RunRegistry } = await import("../../../extensions/subagents/runs.ts");
+const { fakeRun } = await import("./fake-run.ts");
 
 type Handler = (event: unknown, ctx: unknown) => void;
 
@@ -91,4 +92,39 @@ test("background and foreground runs share one concurrency limit", async () => {
     await registry.stopAll();
     delete process.env.FAKE_PI_MODE;
   }
+});
+
+test("a session start rebuilds the list from the saved results", () => {
+  const { registry, handlers } = load();
+  const saved = fakeRun("scout-00000001", "completed").result;
+  handlers.session_start(
+    {},
+    {
+      sessionManager: {
+        getBranch: () => [
+          {
+            type: "message",
+            message: {
+              role: "toolResult",
+              toolName: "subagent",
+              details: { mode: "single", results: [saved] },
+            },
+          },
+          {
+            type: "custom_message",
+            customType: RESULT_MESSAGE_TYPE,
+            details: {
+              mode: "single",
+              results: [fakeRun("worker-00000002", "failed").result],
+            },
+          },
+        ],
+      },
+      ui: { notify: () => {} },
+    },
+  );
+  assert.deepEqual(
+    registry.list().map((run) => run.result.sessionId),
+    ["worker-00000002", "scout-00000001"],
+  );
 });

@@ -25,6 +25,7 @@ import {
 } from "./dialogs.ts";
 import { Limiter } from "./limiter.ts";
 import { openSubagentSession, returnToParent } from "./navigation.ts";
+import { savedRuns } from "./restore.ts";
 import { type DialogHandler, RpcChild, type RpcRecord } from "./rpc.ts";
 import { RunRegistry, type SubagentRun } from "./runs.ts";
 import {
@@ -1458,6 +1459,15 @@ export default function subagents(
 
   let pruned = false;
   pi.on("session_start", (_event, ctx) => {
+    // A reload or a session switch starts with an empty registry.
+    if (registry.list().length === 0) {
+      for (const run of savedRuns(
+        ctx.sessionManager.getBranch(),
+        RESULT_MESSAGE_TYPE,
+      )) {
+        registry.add(run);
+      }
+    }
     if (pruned) return;
     pruned = true;
     pruneSessions(config.sessionRetentionDays).catch((error: unknown) => {

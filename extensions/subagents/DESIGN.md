@@ -71,8 +71,13 @@
 
 ## Overlay
 
-- `/agents` lists the subagent runs of this Pi process, newest first.
+- `/agents` lists the subagent runs of this session, newest first.
   It keeps every running run and the 50 newest finished ones.
+- A reload or a session switch replaces the extension runtime,
+  so `session_start` rebuilds the finished runs from the session branch:
+  foreground tool results and delivered background results.
+  A background run that never delivered ended with its session
+  and shows as stopped.
   Extension commands run while Pi streams, so it opens during a run.
 - A run opens to its transcript, which follows new output
   until the user scrolls up.
