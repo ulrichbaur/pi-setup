@@ -169,10 +169,7 @@ export default function subagents(
       }
       const choice = await ctx.ui.custom<OverlayChoice>(
         (tui, theme, _keybindings, done) =>
-          new AgentsOverlay(tui, theme, registry, done, {
-            hideThinking,
-            savedSessions: () => listSavedSessions(SAVED_SESSION_LIMIT),
-          }),
+          new AgentsOverlay(tui, theme, registry, done, { hideThinking }),
         {
           overlay: true,
           overlayOptions: {

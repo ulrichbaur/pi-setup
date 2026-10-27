@@ -116,12 +116,6 @@
   so the parent model knows why the output may differ from its request.
 - A child stops taking messages at `agent_settled`,
   because a message sent after it would never run.
-- Tab switches to the saved subagent sessions on disk,
-  newest change first, with their names, ids, and project folders.
-  The list reads only the first 8 KB of each file,
-  so a long history stays fast.
-  A saved session opens read-only; Ctrl+O switches to it.
-  `/agents open` offers the same sessions with their names.
 - A finished run is read-only.
   Continuing it belongs to the parent model through its session id.
 - Ctrl+X stops one run.
@@ -168,6 +162,10 @@
 - `/agents open <id>`, or Ctrl+O in the overlay,
   switches this Pi to a saved subagent session.
   `/agents back` switches to the session it was opened from.
+- `/agents open` completes the saved session ids with their names,
+  newest change first.
+  The list reads only the first 8 KB of each file,
+  so a long history stays fast.
 - The opened session runs with the user's normal setup:
   tools, skills, extensions, and bash-guard.
   The agent's role prompt does not apply there.

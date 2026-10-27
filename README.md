@@ -195,7 +195,6 @@ A background run never opens a dialog over your work.
 Its approvals wait in `/agents`, and you get a notice.
 An unanswered one is cancelled after 10 minutes, and `safe_bash` blocks the command.
 `/agents` lists this session's subagent runs, even while one runs.
-Press Tab there to browse saved subagent sessions from earlier work.
 Open a running subagent to follow it, send it a message
 (Enter steers, Alt+Enter queues a follow-up), or stop it with Ctrl+X.
 The parent model sees the messages you sent.
