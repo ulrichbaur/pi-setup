@@ -15,8 +15,16 @@ export function createDialogQueue(): <T>(task: () => Promise<T>) => Promise<T> {
   };
 }
 
-function text(value: unknown): string {
+export function text(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+export function choices(request: RpcRecord): string[] {
+  return Array.isArray(request.options)
+    ? request.options.filter(
+        (choice): choice is string => typeof choice === "string",
+      )
+    : [];
 }
 
 export async function forwardDialog(
@@ -39,12 +47,7 @@ export async function forwardDialog(
     const options = { signal, timeout };
     switch (request.method) {
       case "select": {
-        const choices = Array.isArray(request.options)
-          ? request.options.filter(
-              (choice): choice is string => typeof choice === "string",
-            )
-          : [];
-        const value = await ui.select(title, choices, options);
+        const value = await ui.select(title, choices(request), options);
         return value === undefined ? CANCELLED : { value };
       }
       case "confirm":

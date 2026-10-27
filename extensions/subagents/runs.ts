@@ -24,7 +24,7 @@ export interface PendingDialog {
 
 export type MessageMode = "steer" | "followUp";
 
-function isActive(run: SubagentRun): boolean {
+export function isActive(run: SubagentRun): boolean {
   const { status } = run.result.progress;
   return status === "pending" || status === "running";
 }

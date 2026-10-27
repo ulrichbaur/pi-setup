@@ -19,6 +19,19 @@ function formatDuration(milliseconds: number): string {
 
 export type Theme = ExtensionContext["ui"]["theme"];
 
+export function statusIcon(result: AgentResult, theme: Theme): string {
+  switch (result.progress.status) {
+    case "running":
+      return theme.fg("warning", "⟳");
+    case "pending":
+      return theme.fg("dim", "○");
+    case "completed":
+      return theme.fg("success", "✓");
+    default:
+      return theme.fg("error", "✗");
+  }
+}
+
 function renderAgent(
   result: AgentResult,
   expanded: boolean,
@@ -26,18 +39,10 @@ function renderAgent(
   display: TranscriptDisplay,
 ): Container {
   const container = new Container();
-  const icon =
-    result.progress.status === "running"
-      ? theme.fg("warning", "⟳")
-      : result.progress.status === "pending"
-        ? theme.fg("dim", "○")
-        : result.progress.status === "completed"
-          ? theme.fg("success", "✓")
-          : theme.fg("error", "✗");
   const tokens = result.usage.input + result.usage.output;
   container.addChild(
     new Text(
-      `${icon} ${theme.fg("toolTitle", theme.bold(result.agent))}${result.agentSource ? theme.fg("dim", ` [${result.agentSource}]`) : ""} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}${result.sessionId ? ` · ${result.sessionId}` : ""}`)}`,
+      `${statusIcon(result, theme)} ${theme.fg("toolTitle", theme.bold(result.agent))}${result.agentSource ? theme.fg("dim", ` [${result.agentSource}]`) : ""} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}${result.sessionId ? ` · ${result.sessionId}` : ""}`)}`,
       0,
       0,
     ),

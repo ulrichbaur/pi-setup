@@ -30,6 +30,7 @@ import {
 import { ASK_FLAG } from "./tools/safe-bash.ts";
 import {
   applyTranscriptEvent,
+  contentText,
   countMessageEntries,
   emptyTranscript,
 } from "./transcript.ts";
@@ -46,6 +47,7 @@ interface JsonEvent {
   toolCallId?: unknown;
   toolName?: unknown;
   args?: unknown;
+  result?: unknown;
   message?: unknown;
 }
 
@@ -96,18 +98,6 @@ export function pendingResult(
   };
 }
 
-function contentText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter(
-      (part): part is { type: "text"; text: string } =>
-        isRecord(part) && part.type === "text" && typeof part.text === "string",
-    )
-    .map((part) => part.text)
-    .join("\n");
-}
-
 function toolArgsPreview(args: unknown): string {
   if (!isRecord(args)) return "";
   for (const key of ["command", "path", "query", "url", "pattern"]) {
@@ -131,8 +121,6 @@ function addUsage(target: UsageStats, value: unknown): void {
 // By call id: a model can run several tools at once.
 const runningTools = new WeakMap<AgentResult, Map<string, ToolEvent>>();
 
-const askedQuestions = new WeakMap<AgentResult, Map<string, string>>();
-
 function showLatestRunningTool(result: AgentResult): void {
   const latest = [...(runningTools.get(result)?.values() ?? [])].at(-1);
   result.progress.currentTool = latest?.tool;
@@ -153,18 +141,6 @@ export function applyEvent(result: AgentResult, record: RpcRecord): void {
       tool: typeof event.toolName === "string" ? event.toolName : "tool",
       args: toolArgsPreview(event.args),
     });
-    if (
-      event.toolName === "ask_parent" &&
-      isRecord(event.args) &&
-      typeof event.args.question === "string"
-    ) {
-      let asked = askedQuestions.get(result);
-      if (!asked) {
-        asked = new Map();
-        askedQuestions.set(result, asked);
-      }
-      asked.set(callId, event.args.question);
-    }
     showLatestRunningTool(result);
     return;
   }
@@ -176,10 +152,13 @@ export function applyEvent(result: AgentResult, record: RpcRecord): void {
       result.progress.recentTools.push(tool);
       result.progress.recentTools = result.progress.recentTools.slice(-20);
     }
-    const question = askedQuestions.get(result)?.get(callId);
-    if (question !== undefined) {
-      askedQuestions.get(result)?.delete(callId);
-      result.question = question;
+    if (
+      event.toolName === "ask_parent" &&
+      isRecord(event.result) &&
+      isRecord(event.result.details) &&
+      typeof event.result.details.question === "string"
+    ) {
+      result.question = event.result.details.question;
     }
     showLatestRunningTool(result);
     return;
@@ -357,18 +336,25 @@ export function finalStatus(
   return exitedCleanly && !error ? "completed" : "failed";
 }
 
+function abortReason(
+  run: SubagentRun,
+  context: RunContext,
+): string | undefined {
+  if (context.signal?.aborted) return "Subagent was aborted";
+  if (run.stop.signal.aborted) return "Stopped by the user";
+  return undefined;
+}
+
 async function runAgent(
   plan: RunPlan,
   run: SubagentRun,
   context: RunContext,
+  signal: AbortSignal,
   onUpdate?: (result: AgentResult) => void,
 ): Promise<AgentResult> {
   const { agent, task, cwd, target } = plan;
   const { parentModel, availableModels, thinkingLevel, ui } = context;
   const { result } = run;
-  const signal = context.signal
-    ? AbortSignal.any([context.signal, run.stop.signal])
-    : run.stop.signal;
   const selectedModel = selectSubagentModel(
     agent.modelPreferences,
     availableModels,
@@ -512,11 +498,7 @@ async function runAgent(
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
-  if (run.stop.signal.aborted && !context.signal?.aborted) {
-    result.progress.error = "Stopped by the user";
-  } else if (signal.aborted) {
-    result.progress.error = "Subagent was aborted";
-  }
+  result.progress.error = abortReason(run, context) ?? result.progress.error;
 
   result.progress.durationMs = Date.now() - startedAt;
   result.progress.status = finalStatus(
@@ -557,26 +539,21 @@ export async function runAll(
   return Promise.all(
     plans.map(async (plan, index) => {
       const run = runs[index];
-      const waitSignal = context.signal
+      const signal = context.signal
         ? AbortSignal.any([context.signal, run.stop.signal])
         : run.stop.signal;
       try {
         await limiter.run(
-          () => runAgent(plan, run, context, update),
-          waitSignal,
+          () => runAgent(plan, run, context, signal, update),
+          signal,
         );
       } catch (error) {
         run.child = undefined;
         run.result.live = undefined;
         run.result.progress.status = "failed";
         run.result.progress.error =
-          run.stop.signal.aborted && !context.signal?.aborted
-            ? "Stopped by the user"
-            : context.signal?.aborted
-              ? "Subagent was aborted"
-              : error instanceof Error
-                ? error.message
-                : String(error);
+          abortReason(run, context) ??
+          (error instanceof Error ? error.message : String(error));
         run.result.output ||= `Error: ${run.result.progress.error}`;
       }
       update();

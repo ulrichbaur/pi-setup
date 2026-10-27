@@ -15,6 +15,7 @@ import {
 import { type Component, Container, type TUI } from "@earendil-works/pi-tui";
 import { isRecord } from "../../lib/is-record.ts";
 import {
+  contentText,
   loadTranscript,
   type PendingToolResult,
   type TranscriptMessage,
@@ -64,18 +65,6 @@ interface CachedMessage {
 }
 const cache = new WeakMap<TranscriptMessage, CachedMessage>();
 
-function text(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter(
-      (part): part is { type: "text"; text: string } =>
-        isRecord(part) && part.type === "text" && typeof part.text === "string",
-    )
-    .map((part) => part.text)
-    .join("\n");
-}
-
 function toolCalls(message: TranscriptMessage): ToolCall[] {
   if (!Array.isArray(message.content)) return [];
   return message.content.filter(
@@ -101,7 +90,10 @@ function cachedMessage(
             hideThinking,
             getMarkdownTheme(),
           )
-        : new UserMessageComponent(text(message.content), getMarkdownTheme());
+        : new UserMessageComponent(
+            contentText(message.content),
+            getMarkdownTheme(),
+          );
     entry = {
       component,
       tools: new Map(),

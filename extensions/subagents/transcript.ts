@@ -22,6 +22,18 @@ export function emptyTranscript(): LiveTranscript {
   return { messages: [], pendingResults: {} };
 }
 
+export function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(
+      (part): part is { type: "text"; text: string } =>
+        isRecord(part) && part.type === "text" && typeof part.text === "string",
+    )
+    .map((part) => part.text)
+    .join("\n");
+}
+
 // Pi records the system prompt as a message; the transcript leaves it out.
 function isShown(message: unknown): message is TranscriptMessage {
   return (

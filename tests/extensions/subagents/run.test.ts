@@ -308,7 +308,12 @@ test("a question to the parent counts only when the run ends with it", () => {
       toolName: "ask_parent",
       args: { question },
     });
-    applyEvent(result, { type: "tool_execution_end", toolCallId: id });
+    applyEvent(result, {
+      type: "tool_execution_end",
+      toolCallId: id,
+      toolName: "ask_parent",
+      result: { details: { question } },
+    });
   };
 
   ask("a", "Which database?");

@@ -12,11 +12,14 @@ import {
   truncateToWidth,
 } from "@earendil-works/pi-tui";
 import { formatCost } from "../../lib/subagent-cost.ts";
-import type {
-  MessageMode,
-  PendingDialog,
-  RunRegistry,
-  SubagentRun,
+import { choices, text } from "./dialogs.ts";
+import { statusIcon } from "./render.ts";
+import {
+  isActive,
+  type MessageMode,
+  type PendingDialog,
+  type RunRegistry,
+  type SubagentRun,
 } from "./runs.ts";
 import type { SavedSession } from "./sessions.ts";
 import { loadTranscript } from "./transcript.ts";
@@ -44,15 +47,6 @@ function formatAgo(milliseconds: number): string {
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function isActive(run: SubagentRun): boolean {
-  const { status } = run.result.progress;
-  return status === "pending" || status === "running";
 }
 
 export class AgentsOverlay implements Component, Focusable {
@@ -161,9 +155,9 @@ export class AgentsOverlay implements Component, Focusable {
     return runs;
   }
 
-  private handleListInput(data: string): void {
-    const runs = this.runs();
-    const index = this.selected ? runs.indexOf(this.selected) : -1;
+  /** Handles the keys both lists share and returns the new selection. */
+  private listKey<T>(items: T[], selected: T | undefined, data: string) {
+    const index = selected ? items.indexOf(selected) : -1;
     if (
       matchesKey(data, Key.escape) ||
       matchesKey(data, Key.ctrl("c")) ||
@@ -171,10 +165,16 @@ export class AgentsOverlay implements Component, Focusable {
     ) {
       this.close();
     } else if (matchesKey(data, Key.up)) {
-      this.selected = runs[Math.max(0, index - 1)];
+      return items[Math.max(0, index - 1)];
     } else if (matchesKey(data, Key.down)) {
-      this.selected = runs[Math.min(runs.length - 1, index + 1)];
-    } else if (matchesKey(data, Key.enter) && this.selected) {
+      return items[Math.min(items.length - 1, index + 1)];
+    }
+    return selected;
+  }
+
+  private handleListInput(data: string): void {
+    this.selected = this.listKey(this.runs(), this.selected, data);
+    if (matchesKey(data, Key.enter) && this.selected) {
       this.open(this.selected);
     } else if (matchesKey(data, Key.ctrl("x")) && this.selected) {
       this.stop(this.selected);
@@ -197,22 +197,9 @@ export class AgentsOverlay implements Component, Focusable {
   }
 
   private handleSavedInput(data: string): void {
-    const index = this.selectedSaved
-      ? this.saved.indexOf(this.selectedSaved)
-      : -1;
-    if (
-      matchesKey(data, Key.escape) ||
-      matchesKey(data, Key.ctrl("c")) ||
-      data === "q"
-    ) {
-      this.close();
-    } else if (matchesKey(data, Key.tab)) {
+    this.selectedSaved = this.listKey(this.saved, this.selectedSaved, data);
+    if (matchesKey(data, Key.tab)) {
       this.view = "list";
-    } else if (matchesKey(data, Key.up)) {
-      this.selectedSaved = this.saved[Math.max(0, index - 1)];
-    } else if (matchesKey(data, Key.down)) {
-      this.selectedSaved =
-        this.saved[Math.min(this.saved.length - 1, index + 1)];
     } else if (matchesKey(data, Key.enter) && this.selectedSaved) {
       this.view = "savedDetail";
       this.scrollFromEnd = 0;
@@ -276,19 +263,13 @@ export class AgentsOverlay implements Component, Focusable {
 
   private questionList(question: PendingDialog): SelectList {
     if (this.answerList?.question === question) return this.answerList.list;
-    const { request } = question;
-    const options = Array.isArray(request.options)
-      ? request.options.filter(
-          (option): option is string => typeof option === "string",
-        )
-      : [];
     const items: SelectItem[] =
-      request.method === "confirm"
+      question.request.method === "confirm"
         ? [
             { value: "yes", label: "Yes" },
             { value: "no", label: "No" },
           ]
-        : options.map((option) => ({ value: option, label: option }));
+        : choices(question.request).map((value) => ({ value, label: value }));
     const list = new SelectList(items, Math.min(items.length, 8), {
       selectedPrefix: (value) => this.theme.fg("accent", value),
       selectedText: (value) => this.theme.fg("accent", value),
@@ -344,22 +325,9 @@ export class AgentsOverlay implements Component, Focusable {
     );
   }
 
-  private statusIcon(run: SubagentRun): string {
-    switch (run.result.progress.status) {
-      case "running":
-        return this.theme.fg("warning", "⟳");
-      case "pending":
-        return this.theme.fg("dim", "○");
-      case "completed":
-        return this.theme.fg("success", "✓");
-      default:
-        return this.theme.fg("error", "✗");
-    }
-  }
-
   private summary(run: SubagentRun): string {
     const { result } = run;
-    return `${this.statusIcon(run)} ${this.theme.bold(result.agent)}${result.agentSource ? ` [${result.agentSource}]` : ""} ${this.theme.fg(
+    return `${statusIcon(result, this.theme)} ${this.theme.bold(result.agent)}${result.agentSource ? ` [${result.agentSource}]` : ""} ${this.theme.fg(
       "dim",
       `${result.sessionId ?? ""} · ${result.progress.status} · ${result.progress.toolCount} tools · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}`,
     )}`;
@@ -429,7 +397,7 @@ export class AgentsOverlay implements Component, Focusable {
       ),
     ];
     const selected = this.selected ? runs.indexOf(this.selected) : 0;
-    return this.listFrame(width, maxHeight, header, body, footer, selected, 2);
+    return this.listFrame(width, maxHeight, header, body, footer, selected);
   }
 
   private listFrame(
@@ -439,13 +407,10 @@ export class AgentsOverlay implements Component, Focusable {
     body: string[],
     footer: string[],
     selectedIndex: number,
-    linesPerItem: number,
   ): string[] {
     const height = this.measureViewport(width, maxHeight, header, footer);
-    const firstVisibleLine = Math.max(
-      0,
-      (selectedIndex + 1) * linesPerItem - height,
-    );
+    // Each item takes two lines.
+    const firstVisibleLine = Math.max(0, (selectedIndex + 1) * 2 - height);
     const visible = body.slice(firstVisibleLine, firstVisibleLine + height);
     return this.frame(width, header, visible, footer);
   }
@@ -501,7 +466,7 @@ export class AgentsOverlay implements Component, Focusable {
     const selected = this.selectedSaved
       ? this.saved.indexOf(this.selectedSaved)
       : 0;
-    return this.listFrame(width, maxHeight, header, body, footer, selected, 2);
+    return this.listFrame(width, maxHeight, header, body, footer, selected);
   }
 
   private renderSavedDetail(

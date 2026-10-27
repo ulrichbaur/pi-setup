@@ -7,7 +7,11 @@ import {
 import { isRecord } from "../../lib/is-record.ts";
 import type { RunRegistry } from "./runs.ts";
 import { findSession, SESSIONS_DIR, sessionIdOf } from "./sessions.ts";
-import { countMessageEntries, loadTranscript } from "./transcript.ts";
+import {
+  contentText,
+  countMessageEntries,
+  loadTranscript,
+} from "./transcript.ts";
 
 // A switch replaces the extension runtime, so the way back lives on disk.
 export const RETURNS_PATH = join(getAgentDir(), "subagents", "returns.json");
@@ -85,18 +89,6 @@ export function takeReturn(
   return point;
 }
 
-function text(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter(
-      (part): part is { type: "text"; text: string } =>
-        isRecord(part) && part.type === "text" && typeof part.text === "string",
-    )
-    .map((part) => part.text)
-    .join("\n");
-}
-
 /** Undefined when the session did not grow since it was opened. */
 export function returnNote(
   session: string,
@@ -108,7 +100,7 @@ export function returnNote(
   const added = loadTranscript(session, point.messages, messages);
   const answer = added
     .filter((message) => message.role === "assistant")
-    .map((message) => text(message.content).trim())
+    .map((message) => contentText(message.content).trim())
     .filter(Boolean)
     .at(-1);
   let note = `The user continued subagent session ${sessionId} directly.`;
@@ -123,10 +115,11 @@ export function returnNote(
 // The custom message that tells the parent model about the user's work.
 export const RETURN_MESSAGE_TYPE = "subagent-return";
 
-type Notify = (message: string, type?: "info" | "warning" | "error") => void;
-
-function report(notify: Notify, error: unknown): void {
-  notify(error instanceof Error ? error.message : String(error), "error");
+function report(ctx: ExtensionCommandContext, error: unknown): void {
+  ctx.ui.notify(
+    error instanceof Error ? error.message : String(error),
+    "error",
+  );
 }
 
 export async function openSubagentSession(
@@ -134,9 +127,8 @@ export async function openSubagentSession(
   registry: RunRegistry,
   id: string,
 ): Promise<void> {
-  const notify: Notify = (message, type) => ctx.ui.notify(message, type);
   if (!ctx.isIdle()) {
-    notify(
+    ctx.ui.notify(
       "Wait until the current run ends before opening a session.",
       "warning",
     );
@@ -144,16 +136,19 @@ export async function openSubagentSession(
   }
   const target = findSession(id);
   if (!target) {
-    notify(`Unknown subagent session ${id} in ${SESSIONS_DIR}`, "error");
+    ctx.ui.notify(`Unknown subagent session ${id} in ${SESSIONS_DIR}`, "error");
     return;
   }
   const parent = ctx.sessionManager.getSessionFile();
   if (!parent) {
-    notify("This session is not saved, so Pi could not return to it.", "error");
+    ctx.ui.notify(
+      "This session is not saved, so Pi could not return to it.",
+      "error",
+    );
     return;
   }
   if (parent === target) {
-    notify(`This is already subagent session ${id}.`, "info");
+    ctx.ui.notify(`This is already subagent session ${id}.`, "info");
     return;
   }
 
@@ -165,7 +160,7 @@ export async function openSubagentSession(
     );
     if (!confirmed) return;
     if (!(await registry.stopAll())) {
-      notify(
+      ctx.ui.notify(
         "Running subagents did not stop in time; nothing was opened.",
         "error",
       );
@@ -176,7 +171,7 @@ export async function openSubagentSession(
   try {
     recordReturn(target, parent);
   } catch (error) {
-    report(notify, error);
+    report(ctx, error);
     return;
   }
   const { cancelled } = await ctx.switchSession(target);
@@ -186,25 +181,30 @@ export async function openSubagentSession(
 export async function returnToParent(
   ctx: ExtensionCommandContext,
 ): Promise<void> {
-  const notify: Notify = (message, type) => ctx.ui.notify(message, type);
   const current = ctx.sessionManager.getSessionFile();
   let point: ReturnPoint | undefined;
   try {
     point = current ? readReturns()[current] : undefined;
   } catch (error) {
-    report(notify, error);
+    report(ctx, error);
     return;
   }
   if (!current || !point) {
-    notify("No parent session is recorded for this session.", "warning");
+    ctx.ui.notify("No parent session is recorded for this session.", "warning");
     return;
   }
   if (!existsSync(point.parent)) {
-    notify(`${point.parent}: the parent session no longer exists`, "error");
+    ctx.ui.notify(
+      `${point.parent}: the parent session no longer exists`,
+      "error",
+    );
     return;
   }
   if (!ctx.isIdle()) {
-    notify("Wait until the current run ends before going back.", "warning");
+    ctx.ui.notify(
+      "Wait until the current run ends before going back.",
+      "warning",
+    );
     return;
   }
 
