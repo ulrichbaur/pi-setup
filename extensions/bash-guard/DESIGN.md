@@ -22,10 +22,22 @@
   is not recoverable and is flagged like `reset --hard`.
 - Parse the command; never match on raw text.
   Follow `bash -c`, `eval`, and `su -c`; strip `env`, `nice`, `nohup`,
-  `time`, `timeout`, `busybox`, and variable prefixes; judge the command
-  that `xargs` or `find -exec` runs; and inspect every segment
+  `time`, `timeout`, `busybox`, `exec`, shell keywords, and variable prefixes;
+  reduce a command path to its name; judge the command
+  that `xargs` or `find -exec` runs; and inspect every step
   of a pipeline or command list.
+- Newlines, backticks, `$(…)`, and subshells end a step too.
+  A heredoc body is data and is skipped, unless a shell reads it as a script.
 - An unparseable command is flagged. Unknown is not safe.
+- Each finding names the risky step and the reason.
+  The review dialog and every block message show the same list,
+  so the user and the model both see what was flagged and why.
+- A complex command, meaning several lines, command substitution,
+  or shell control flow, is never shown for review,
+  because a person cannot judge it reliably as a whole.
+  If one of its steps is risky, the guard blocks it with the findings
+  and asks the model to run that step as its own simple command.
+  A complex command without a risky step runs as usual.
 - Without a UI the guard fails closed unless the user opted in
   with `--bash-guard-auto-allow`.
 - A command the user aborted is blocked for one minute, whitespace

@@ -2,13 +2,13 @@ import {
   createBashToolDefinition,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { subagentRisk } from "../../../lib/bash-policy.ts";
+import { formatFindings, subagentRisk } from "../../../lib/bash-policy.ts";
 
 /** A subagent has no user to ask, so every risky command is blocked. */
 export function commandBlockReason(command: string): string | null {
   const risk = subagentRisk(command);
   if (!risk) return null;
-  return `Command blocked by safe_bash: ${risk.reasons.join("; ")}. Use a safer command, or ask the agent that gave you this task to run it.`;
+  return `Command blocked by safe_bash:\n${formatFindings(risk.findings)}\nUse a safer command, or ask the agent that gave you this task to run it.`;
 }
 
 export default function safeBash(pi: ExtensionAPI): void {

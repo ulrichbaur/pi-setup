@@ -1,10 +1,22 @@
+import { posix } from "node:path";
 import { parse as parseShell } from "shell-quote";
 
 export type BashRiskSeverity = "high" | "medium";
 
+export type BashFinding = {
+  /** The risky step, as the policy read it. */
+  command: string;
+  reason: string;
+};
+
 export type BashRisk = {
   severity: BashRiskSeverity;
-  reasons: string[];
+  findings: BashFinding[];
+  /**
+   * True for several lines, command substitution, or shell control flow,
+   * which a person cannot review reliably as a whole.
+   */
+  complex: boolean;
 };
 
 /**
@@ -28,14 +40,21 @@ type ShellToken = string | OperatorToken;
 
 type Match = {
   rule: PolicyRule;
-  reason: string;
+  finding: BashFinding;
 };
 
 const SHELL_COMMANDS = new Set(["sh", "bash", "zsh", "fish", "dash"]);
-const CONTROL_OPERATORS = new Set(["&&", "||", ";", "&", "|"]);
+// Parentheses also end a step, so subshells and `$(…)` are read on their own.
+const CONTROL_OPERATORS = new Set(["&&", "||", ";", "&", "|", "(", ")"]);
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const FORK_BOMB_PATTERN = /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/;
 const MAX_SHELL_DEPTH = 2;
+// A heredoc: its operator line, its body, and the closing delimiter.
+const HEREDOC =
+  /(<<-?[ \t]*)(['"]?)(\w+)\2([^\n]*)\n(?:[\s\S]*?\n)?[ \t]*\3[ \t]*(?=\n|$)/g;
+const COMPLEX_SHAPE =
+  /\n|`|[$<>]\(|(^|[;&|({]\s*)(if|then|elif|else|for|while|until|do|case)\b/;
+const MAX_STEP_LENGTH = 80;
 
 // ---------------------------------------------------------------------------
 // Shell parsing
@@ -67,6 +86,19 @@ function splitCommands(tokens: ShellToken[]): ShellToken[][] {
 
 // Programs that run the rest of their arguments as a command.
 const SIMPLE_WRAPPERS = new Set(["command", "nohup", "time", "busybox"]);
+// Shell words that may come before a command; `exec` runs it in place.
+const LEADING_KEYWORDS = new Set([
+  "if",
+  "then",
+  "elif",
+  "else",
+  "while",
+  "until",
+  "do",
+  "!",
+  "{",
+  "exec",
+]);
 const TIMEOUT_OPTIONS_WITH_VALUE = new Set([
   "-s",
   "-k",
@@ -88,16 +120,20 @@ function skipOptions(
 }
 
 /**
- * Strips variable assignments and wrappers such as `env`, `nice`, `nohup`,
- * `time`, `timeout`, and `busybox` so the words start at the real command.
+ * Strips variable assignments, shell keywords, and wrappers such as `env`,
+ * `nice`, `nohup`, `time`, `timeout`, and `busybox`, and reduces a command
+ * path to its name, so the words start at the real command.
  */
 function normalizeWords(input: string[]): string[] {
   let words = input;
   for (;;) {
     while (words[0]?.match(ENV_ASSIGNMENT)) words = words.slice(1);
+    if (words[0]?.includes("/")) {
+      words = [posix.basename(words[0]), ...words.slice(1)];
+    }
     const head = words[0];
     if (head === undefined) return words;
-    if (SIMPLE_WRAPPERS.has(head)) {
+    if (SIMPLE_WRAPPERS.has(head) || LEADING_KEYWORDS.has(head)) {
       words = words.slice(1);
     } else if (head === "env") {
       words = words.slice(skipOptions(words, 1, new Set()));
@@ -190,23 +226,78 @@ function delegatedCommands(words: string[]): string[][] {
 function nestedShellCommands(name: string, args: string[]): string[] {
   if (name === "eval") return args.length > 0 ? [args.join(" ")] : [];
   if (SHELL_COMMANDS.has(name) || name === "su") {
-    const commandIndex = args.indexOf("-c");
+    // `-c` may share a word with other short options, as in `-lc`.
+    const commandIndex = args.findIndex((argument) =>
+      /^-[A-Za-z]*c[A-Za-z]*$/.test(argument),
+    );
     const nested = commandIndex >= 0 ? args[commandIndex + 1] : undefined;
     return nested ? [nested] : [];
   }
   return [];
 }
 
+/** True when the last command on this line is a shell, which runs its input. */
+function feedsShell(line: string): boolean {
+  const segment = line.split(/[;&|]/).at(-1) ?? "";
+  const [name = ""] = normalizeWords(segment.trim().split(/\s+/));
+  return SHELL_COMMANDS.has(name);
+}
+
+/**
+ * Joins continued lines and drops heredoc bodies, which are data,
+ * unless a shell reads the body as a script.
+ */
+function readableText(command: string): string {
+  return command
+    .replace(/\\\n/g, " ")
+    .replace(
+      HEREDOC,
+      (
+        heredoc: string,
+        operator: string,
+        _quote: string,
+        delimiter: string,
+        rest: string,
+        offset: number,
+        text: string,
+      ) => {
+        const line = text.slice(text.lastIndexOf("\n", offset) + 1, offset);
+        return feedsShell(line) ? heredoc : `${operator}${delimiter}${rest}`;
+      },
+    );
+}
+
 function parseCommand(
   command: string,
 ): ShellToken[] | "fork bomb" | "parse error" {
-  const normalized = command.replace(/\\\n/g, " ");
-  if (FORK_BOMB_PATTERN.test(normalized)) return "fork bomb";
+  const text = readableText(command);
+  if (FORK_BOMB_PATTERN.test(text)) return "fork bomb";
   try {
-    return parseShell(normalized) as ShellToken[];
+    // A newline or a backtick ends a step like `;` does. Variables keep
+    // their names, so a finding shows `$file` rather than an empty word.
+    return parseShell(
+      text.replace(/[\n`]/g, ";"),
+      (name) => `$${name}`,
+    ) as ShellToken[];
   } catch {
     return "parse error";
   }
+}
+
+/** Long steps are cut, so a finding stays one readable line. */
+function shorten(text: string): string {
+  return text.length > MAX_STEP_LENGTH
+    ? `${text.slice(0, MAX_STEP_LENGTH - 1)}…`
+    : text;
+}
+
+/** The step as the user would type it. */
+function stepText(words: string[]): string {
+  return shorten(
+    words
+      .map((word) => (/\s/.test(word) ? JSON.stringify(word) : word))
+      .join(" "),
+  );
 }
 
 function downloadsArePipedToShell(tokens: ShellToken[]): boolean {
@@ -724,8 +815,16 @@ function evaluate(
   depth: number,
   applies: (rule: PolicyRule) => boolean,
 ): Match[] {
+  const whole = shorten(command.replace(/\s+/g, " ").trim());
   const structural = (rule: PolicyRule): Match[] =>
-    applies(rule) ? [{ rule, reason: rule.match("", []) ?? "" }] : [];
+    applies(rule)
+      ? [
+          {
+            rule,
+            finding: { command: whole, reason: rule.match("", []) ?? "" },
+          },
+        ]
+      : [];
 
   const parsed = parseCommand(command);
   if (parsed === "fork bomb") return structural(FORK_BOMB);
@@ -741,7 +840,10 @@ function evaluate(
       for (const rule of POLICY_RULES) {
         if (!applies(rule)) continue;
         const reason = rule.match(name, args);
-        if (reason) matches.push({ rule, reason });
+        if (reason) {
+          const step = stepText([name, ...args]);
+          matches.push({ rule, finding: { command: step, reason } });
+        }
       }
 
       if (depth < MAX_SHELL_DEPTH) {
@@ -754,23 +856,38 @@ function evaluate(
   return matches;
 }
 
-function summarizeRisk(matches: Match[]): BashRisk | null {
-  const reasons = [...new Set(matches.map((match) => match.reason))];
-  if (reasons.length === 0) return null;
+function assess(
+  command: string,
+  applies: (rule: PolicyRule) => boolean,
+): BashRisk | null {
+  const matches = evaluate(command, 0, applies);
+  if (matches.length === 0) return null;
+  const findings = new Map<string, BashFinding>();
+  for (const { finding } of matches) {
+    findings.set(`${finding.command}\n${finding.reason}`, finding);
+  }
   return {
     severity: matches.some((match) => match.rule.severity === "high")
       ? "high"
       : "medium",
-    reasons,
+    findings: [...findings.values()],
+    complex: COMPLEX_SHAPE.test(readableText(command).trim()),
   };
 }
 
 /** The rows the interactive guard asks the user about. */
 export function analyzeBashCommand(command: string): BashRisk | null {
-  return summarizeRisk(evaluate(command, 0, (rule) => rule.severity !== null));
+  return assess(command, (rule) => rule.severity !== null);
 }
 
 /** Every row, for subagents, which have no user to ask. */
 export function subagentRisk(command: string): BashRisk | null {
-  return summarizeRisk(evaluate(command, 0, () => true));
+  return assess(command, () => true);
+}
+
+/** One entry per finding: the step, then why it is risky. */
+export function formatFindings(findings: BashFinding[]): string {
+  return findings
+    .map(({ command, reason }) => `• ${command}\n  ${reason}`)
+    .join("\n");
 }

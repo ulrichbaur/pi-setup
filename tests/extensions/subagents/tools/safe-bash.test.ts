@@ -13,9 +13,9 @@ test("safe bash blocks what either policy catches", () => {
   assert.equal(commandBlockReason("pnpm test"), null);
 });
 
-test("a reason caught by both policies appears once", () => {
+test("the block names each risky step and why", () => {
   assert.equal(
-    commandBlockReason("git push")?.match(/git push publishes/g)?.length,
-    1,
+    commandBlockReason("ls && git push"),
+    "Command blocked by safe_bash:\n• git push\n  git push publishes to a remote (a parent-session operation)\nUse a safer command, or ask the agent that gave you this task to run it.",
   );
 });

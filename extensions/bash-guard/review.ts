@@ -9,7 +9,7 @@ import {
   Text,
   truncateToWidth,
 } from "@earendil-works/pi-tui";
-import type { BashRisk } from "../../lib/bash-policy.ts";
+import { type BashRisk, formatFindings } from "../../lib/bash-policy.ts";
 
 type BashReviewChoice = "abort" | "run";
 
@@ -27,7 +27,7 @@ export class BashReviewComponent implements Component {
   private commandLineCount = 0;
 
   private readonly title: string;
-  private readonly reasons: string;
+  private readonly findings: string;
 
   constructor(
     tui: TUI,
@@ -69,7 +69,7 @@ export class BashReviewComponent implements Component {
     this.actions.onCancel = () => done("abort");
 
     this.title = `${risk.severity.toUpperCase()} risk bash command`;
-    this.reasons = risk.reasons.map((reason) => `• ${reason}`).join("\n");
+    this.findings = formatFindings(risk.findings);
   }
 
   render(width: number): string[] {
@@ -77,8 +77,8 @@ export class BashReviewComponent implements Component {
       this.theme.fg("warning", this.theme.bold(this.title)),
       width,
     );
-    const reasonLines = this.renderText(
-      this.theme.fg("warning", this.reasons),
+    const findingLines = this.renderText(
+      this.theme.fg("warning", this.findings),
       width,
     );
     const commandLines = this.commandText.render(width);
@@ -98,7 +98,7 @@ export class BashReviewComponent implements Component {
     const fullHeader = [
       ...topBorder,
       ...titleLines,
-      ...reasonLines,
+      ...findingLines,
       ...this.separator.render(width),
       ...placeholderHeader,
     ];

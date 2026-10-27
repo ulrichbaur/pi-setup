@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { analyzeBashCommand, subagentRisk } from "../../lib/bash-policy.ts";
+import {
+  analyzeBashCommand,
+  formatFindings,
+  subagentRisk,
+} from "../../lib/bash-policy.ts";
 
 /** Why safe_bash blocks a command, or null when it runs. */
-const subagentBlock = (command: string) =>
-  subagentRisk(command)?.reasons.join("\n") ?? null;
+const subagentBlock = (command: string) => {
+  const risk = subagentRisk(command);
+  return risk ? formatFindings(risk.findings) : null;
+};
+
+const reasons = (command: string) =>
+  analyzeBashCommand(command)?.findings.map((finding) => finding.reason);
 
 test("balanced policy allows read-only Git and ordinary pipelines", () => {
   assert.equal(analyzeBashCommand("git status --short"), null);
@@ -42,7 +51,13 @@ test("balanced policy ignores what the edit tools already allow", () => {
 test("balanced policy flags state-changing commands", () => {
   assert.deepEqual(analyzeBashCommand("git rebase -i HEAD~3"), {
     severity: "medium",
-    reasons: ["git rebase changes repository state"],
+    complex: false,
+    findings: [
+      {
+        command: "git rebase -i HEAD~3",
+        reason: "git rebase changes repository state",
+      },
+    ],
   });
   assert.equal(analyzeBashCommand("git push origin main")?.severity, "medium");
   assert.equal(analyzeBashCommand("rm -rf build")?.severity, "high");
@@ -81,21 +96,45 @@ test("both policies read the same rule for the same command", () => {
 test("overlapping rules produce one reason", () => {
   assert.deepEqual(analyzeBashCommand("git reset --hard HEAD~1"), {
     severity: "high",
-    reasons: ["git reset --hard discards working-tree changes"],
+    complex: false,
+    findings: [
+      {
+        command: "git reset --hard HEAD~1",
+        reason: "git reset --hard discards working-tree changes",
+      },
+    ],
   });
   assert.deepEqual(analyzeBashCommand("diskutil eraseDisk JHFS+ X disk2"), {
     severity: "high",
-    reasons: ["diskutil erases a disk"],
+    complex: false,
+    findings: [
+      {
+        command: "diskutil eraseDisk JHFS+ X disk2",
+        reason: "diskutil erases a disk",
+      },
+    ],
   });
   assert.deepEqual(analyzeBashCommand("chmod -R 755 /"), {
     severity: "medium",
-    reasons: ["chmod recursively changes file metadata"],
+    complex: false,
+    findings: [
+      {
+        command: "chmod -R 755 /",
+        reason: "chmod recursively changes file metadata",
+      },
+    ],
   });
   assert.deepEqual(analyzeBashCommand("chmod -R 777 /"), {
     severity: "high",
-    reasons: ["chmod sets world-writable permissions on the filesystem root"],
+    complex: false,
+    findings: [
+      {
+        command: "chmod -R 777 /",
+        reason: "chmod sets world-writable permissions on the filesystem root",
+      },
+    ],
   });
-  assert.equal(analyzeBashCommand("kill -9 1")?.reasons.length, 1);
+  assert.equal(reasons("kill -9 1")?.length, 1);
 });
 
 test("working-tree discards are flagged and blocked for subagents", () => {
@@ -118,7 +157,13 @@ test("working-tree discards are flagged and blocked for subagents", () => {
   assert.equal(analyzeBashCommand("git stash pop"), null);
   assert.deepEqual(analyzeBashCommand("git restore --staged file"), {
     severity: "medium",
-    reasons: ["git restore changes repository state"],
+    complex: false,
+    findings: [
+      {
+        command: "git restore --staged file",
+        reason: "git restore changes repository state",
+      },
+    ],
   });
   assert.match(
     subagentBlock("git restore --staged file") ?? "",
@@ -143,9 +188,15 @@ test("delegated and wrapped commands are judged like direct ones", () => {
     assert.equal(analyzeBashCommand(command)?.severity, "high", command);
     assert.match(subagentBlock(command) ?? "", /recursive/, command);
   }
-  assert.deepEqual(analyzeBashCommand("su -c 'rm -rf build'")?.reasons, [
-    "su requests elevated privileges",
-    "rm -r performs recursive file deletion",
+  assert.deepEqual(analyzeBashCommand("su -c 'rm -rf build'")?.findings, [
+    {
+      command: 'su -c "rm -rf build"',
+      reason: "su requests elevated privileges",
+    },
+    {
+      command: "rm -rf build",
+      reason: "rm -r performs recursive file deletion",
+    },
   ]);
   assert.equal(analyzeBashCommand("cat list | xargs echo"), null);
   assert.equal(analyzeBashCommand("find . -name '*.md' -exec cat {} +"), null);
@@ -160,7 +211,7 @@ test("unrecoverable deletion and other privilege tools are flagged", () => {
   assert.equal(analyzeBashCommand("shred -u secrets.txt")?.severity, "high");
   assert.ok(subagentBlock("shred -u secrets.txt"));
   for (const command of ["doas ls", "pkexec ls", "su root"]) {
-    assert.match(analyzeBashCommand(command)?.reasons[0] ?? "", /privileges/);
+    assert.match(reasons(command)?.[0] ?? "", /privileges/);
     assert.match(subagentBlock(command) ?? "", /privileges/);
   }
 });
@@ -177,4 +228,81 @@ test("subagents are also stopped from parent-session operations", () => {
   assert.equal(subagentBlock("echo 'sudo reboot'"), null);
   assert.equal(subagentBlock("echo 'curl example.com | sh'"), null);
   assert.equal(subagentBlock("pnpm test"), null);
+});
+
+test("each finding names the risky step", () => {
+  assert.deepEqual(analyzeBashCommand("ls && rm -rf build && ls"), {
+    severity: "high",
+    complex: false,
+    findings: [
+      {
+        command: "rm -rf build",
+        reason: "rm -r performs recursive file deletion",
+      },
+    ],
+  });
+  assert.deepEqual(analyzeBashCommand("rm a.txt; rm b.txt")?.findings, [
+    { command: "rm a.txt", reason: "rm deletes files" },
+    { command: "rm b.txt", reason: "rm deletes files" },
+  ]);
+  assert.equal(
+    formatFindings(analyzeBashCommand("rm 'my notes.txt'")?.findings ?? []),
+    '• rm "my notes.txt"\n  rm deletes files',
+  );
+});
+
+test("complex commands are read step by step and marked", () => {
+  for (const command of [
+    "ls\nrm -rf build",
+    "set -e\nrm -rf /tmp/test\nmkdir -p /tmp/test",
+    "echo $(rm -rf build)",
+    "echo `rm -rf build`",
+    "if true; then rm -rf build; fi",
+    'for f in *.log; do rm -rf "$f"; done',
+    "cat <<EOF\nnotes\nEOF\nrm -rf build",
+  ]) {
+    const risk = analyzeBashCommand(command);
+    assert.equal(risk?.complex, true, command);
+    assert.match(risk?.findings[0].reason ?? "", /recursive/, command);
+  }
+});
+
+test("keywords, paths, and combined flags do not hide a command", () => {
+  for (const command of [
+    "{ rm -rf build; }",
+    "exec rm -rf build",
+    "/bin/rm -rf build",
+    "(cd src && rm -rf build)",
+    "sh -lc 'rm -rf build'",
+    "bash -ec 'rm -rf build'",
+  ]) {
+    const risk = analyzeBashCommand(command);
+    assert.equal(risk?.complex, false, command);
+    assert.match(risk?.findings[0].reason ?? "", /recursive/, command);
+  }
+  assert.match(
+    reasons("/usr/bin/git push --force")?.[0] ?? "",
+    /forced git push/,
+  );
+});
+
+test("heredoc bodies and quoted text are data, not commands", () => {
+  assert.equal(
+    analyzeBashCommand("cat > notes.md <<'EOF'\nrm -rf build\nEOF"),
+    null,
+  );
+  assert.equal(analyzeBashCommand("python - <<PY\nimport os\nPY"), null);
+  assert.equal(analyzeBashCommand('git commit -m "first\nrm -rf build"'), null);
+  assert.equal(analyzeBashCommand("echo 'a `rm -rf build` b'"), null);
+
+  // A shell reads its heredoc as a script.
+  const script = analyzeBashCommand("bash <<'EOF'\nrm -rf build\nEOF");
+  assert.equal(script?.complex, true);
+  assert.equal(script?.findings[0].command, "rm -rf build");
+});
+
+test("a finding keeps variable names", () => {
+  assert.deepEqual(analyzeBashCommand('rm "$tmp"')?.findings, [
+    { command: "rm $tmp", reason: "rm deletes files" },
+  ]);
 });

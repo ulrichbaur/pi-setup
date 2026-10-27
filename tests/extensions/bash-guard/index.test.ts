@@ -124,10 +124,51 @@ test("bash-guard allows aborting without a reject reason", async () => {
 
 test("bash-guard allows an interactively confirmed command", async () => {
   const handler = createGuardHarness();
+  let message = "";
   const context = {
     hasUI: true,
     mode: "rpc",
-    ui: { confirm: async () => true },
+    ui: {
+      async confirm(_title: string, shown: string) {
+        message = shown;
+        return true;
+      },
+    },
   } as unknown as ExtensionContext;
-  assert.equal(await handler(bashCall("rm file.txt"), context), undefined);
+  assert.equal(
+    await handler(bashCall("ls && rm file.txt"), context),
+    undefined,
+  );
+  assert.equal(
+    message,
+    "• rm file.txt\n  rm deletes files\n\nCommand:\nls && rm file.txt",
+  );
+});
+
+test("bash-guard blocks a complex command with a risky step and names it", async () => {
+  const handler = createGuardHarness();
+  let asked = 0;
+  const context = {
+    hasUI: true,
+    mode: "rpc",
+    ui: {
+      async confirm() {
+        asked += 1;
+        return true;
+      },
+    },
+  } as unknown as ExtensionContext;
+
+  const reason =
+    (await handler(bashCall("set -e\nrm -rf /tmp/t\nmkdir /tmp/t"), context))
+      ?.reason ?? "";
+  assert.match(reason, /too complex to review/);
+  assert.match(reason, /• rm -rf \/tmp\/t\n {2}rm -r performs recursive/);
+  assert.match(reason, /its own simple command/);
+  assert.equal(asked, 0);
+
+  assert.equal(
+    await handler(bashCall("set -e\nmkdir /tmp/t\nls /tmp/t"), context),
+    undefined,
+  );
 });

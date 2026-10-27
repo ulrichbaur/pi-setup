@@ -23,7 +23,11 @@ test("bash review keeps actions visible while a long command scrolls", () => {
   const component = new BashReviewComponent(
     tui,
     theme,
-    { severity: "high", reasons: ["the command deletes files"] },
+    {
+      severity: "high",
+      complex: false,
+      findings: [{ command: "rm notes.txt", reason: "rm deletes files" }],
+    },
     command,
     () => {},
   );

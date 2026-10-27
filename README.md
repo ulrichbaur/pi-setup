@@ -133,6 +133,9 @@ operations that the index or reflog can undo, such as `git add`, `git
 commit`, branch switches, `git merge`, and `git pull`. Commands reached
 through `xargs`, `find -exec`, `eval`, or wrappers like `nohup` are judged
 like direct ones.
+Every prompt and block message lists each risky step with the reason it was flagged.
+A multi-line or otherwise complex command with a risky step is blocked
+instead of shown, and the model is asked to run that step on its own.
 Interactive sessions can approve or block commands and optionally provide a
 reason when they abort one. Non-interactive sessions fail closed unless
 `bash-guard-auto-allow` is enabled. The subagents extension reuses this

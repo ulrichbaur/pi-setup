@@ -3,7 +3,11 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { analyzeBashCommand, type BashRisk } from "../../lib/bash-policy.ts";
+import {
+  analyzeBashCommand,
+  type BashRisk,
+  formatFindings,
+} from "../../lib/bash-policy.ts";
 import { BashReviewComponent } from "./review.ts";
 
 const ABORT_REMEMBER_MS = 60_000;
@@ -34,8 +38,7 @@ async function promptForCommand(
   command: string,
   risk: BashRisk,
 ): Promise<BashPromptResult> {
-  const reasons = risk.reasons.map((reason) => `• ${reason}`).join("\n");
-  const message = `${reasons}\n\nCommand:\n${command}`;
+  const message = `${formatFindings(risk.findings)}\n\nCommand:\n${command}`;
 
   if (ctx.mode !== "tui") {
     const run = await ctx.ui.confirm(
@@ -99,7 +102,15 @@ export default function bashGuard(pi: ExtensionAPI): void {
       if (pi.getFlag("bash-guard-auto-allow") === true) return;
       return {
         block: true,
-        reason: `Blocked by bash-guard because confirmation is unavailable: ${risk.reasons.join("; ")}.`,
+        reason: `Blocked by bash-guard because confirmation is unavailable:\n${formatFindings(risk.findings)}`,
+      };
+    }
+
+    // The user is never asked about a command they cannot judge as a whole.
+    if (risk.complex) {
+      return {
+        block: true,
+        reason: `Blocked by bash-guard: this command is too complex to review as a whole, and it contains risky steps:\n${formatFindings(risk.findings)}\nRun each risky step as its own simple command, so the user can review it.`,
       };
     }
 
