@@ -27,6 +27,7 @@ function createGuardHarness(autoAllow = false) {
       assert.equal(name, "bash-guard-auto-allow");
       return autoAllow;
     },
+    registerCommand() {},
     on(event: string, registered: ToolCallHandler) {
       assert.equal(event, "tool_call");
       handler = registered;

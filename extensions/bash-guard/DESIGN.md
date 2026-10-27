@@ -43,6 +43,19 @@
 - A command the user aborted is blocked for one minute, whitespace
   changes included, and the abort reason is passed back to the model.
 
+## Stats
+
+- `/bash-guard stats` reads every saved session and pairs each bash call
+  with its result: it ran, the user rejected it, or the guard blocked it.
+  Pi records no decision itself, so the outcome comes from the result text.
+- The current policy classifies each command, so the report shows
+  how the user treated what the guard flags today.
+  "Ran" cannot tell an approval from a session without the guard
+  or a command an older policy let through, and the report says so.
+- Forked sessions copy their history; each call counts once by id.
+- A session that cannot be read is listed with its path,
+  and the rest of the report still appears.
+
 ## Subagent policy
 
 - A subagent has no user to ask, so its `safe_bash` tool blocks every row.

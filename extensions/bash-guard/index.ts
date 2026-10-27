@@ -9,6 +9,7 @@ import {
   formatFindings,
 } from "../../lib/bash-policy.ts";
 import { BashReviewComponent } from "./review.ts";
+import { registerBashGuardCommand } from "./stats.ts";
 
 const ABORT_REMEMBER_MS = 60_000;
 
@@ -74,6 +75,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
     type: "boolean",
     default: false,
   });
+  registerBashGuardCommand(pi);
 
   const recentlyAborted = new Map<string, RecentAbort>();
   pi.on("tool_call", async (event, ctx) => {
