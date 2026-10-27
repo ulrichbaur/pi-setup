@@ -12,7 +12,6 @@ import {
   truncateToWidth,
 } from "@earendil-works/pi-tui";
 import { formatCost } from "../../lib/subagent-cost.ts";
-import { CANCELLED } from "./rpc.ts";
 import type {
   MessageMode,
   PendingDialog,
@@ -47,16 +46,8 @@ function formatAgo(milliseconds: number): string {
   return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
 
-// An item value no select option can have.
-const DISMISS = "\u0000dismiss";
-
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
-}
-
-function isChoice(question: PendingDialog): boolean {
-  const { method } = question.request;
-  return method === "select" || method === "confirm";
 }
 
 function isActive(run: SubagentRun): boolean {
@@ -74,7 +65,6 @@ export class AgentsOverlay implements Component, Focusable {
   private viewportHeight = 1;
   private notice: { text: string; error: boolean } | undefined;
   private readonly input = new Input({ prompt: "› " });
-  private readonly answerInput = new Input({ prompt: "Answer › " });
   private answerList: { question: PendingDialog; list: SelectList } | undefined;
   private readonly border: DynamicBorder;
   private readonly separator: DynamicBorder;
@@ -104,10 +94,6 @@ export class AgentsOverlay implements Component, Focusable {
       theme.fg("borderMuted", text),
     );
     this.input.onSubmit = (value) => this.send(value, "steer");
-    this.answerInput.onSubmit = (value) => {
-      const question = this.selected?.pendingDialogs[0];
-      if (question) this.answer(question, value);
-    };
     this.unsubscribe = registry.subscribe(() => tui.requestRender());
   }
 
@@ -121,11 +107,10 @@ export class AgentsOverlay implements Component, Focusable {
   }
 
   private updateFocus(): void {
-    const question = this.selected?.pendingDialogs[0];
-    const detail = this.isFocused && this.view === "detail";
-    const answering = question !== undefined && !isChoice(question);
-    this.input.focused = detail && !answering;
-    this.answerInput.focused = detail && answering;
+    this.input.focused =
+      this.isFocused &&
+      this.view === "detail" &&
+      !this.selected?.pendingDialogs.length;
   }
 
   handleInput(data: string): void {
@@ -156,7 +141,6 @@ export class AgentsOverlay implements Component, Focusable {
 
   invalidate(): void {
     this.input.invalidate();
-    this.answerInput.invalidate();
   }
 
   private close(choice?: OverlayChoice): void {
@@ -272,10 +256,8 @@ export class AgentsOverlay implements Component, Focusable {
       this.openSession(run);
     } else if (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)) {
       this.scroll(data);
-    } else if (question && isChoice(question)) {
-      this.questionList(question).handleInput(data);
     } else if (question) {
-      this.answerInput.handleInput(data);
+      this.questionList(question).handleInput(data);
     } else if (matchesKey(data, Key.alt("enter"))) {
       this.send(this.input.getValue(), "followUp");
     } else if (isActive(run)) {
@@ -306,10 +288,7 @@ export class AgentsOverlay implements Component, Focusable {
             { value: "yes", label: "Yes" },
             { value: "no", label: "No" },
           ]
-        : [
-            ...options.map((option) => ({ value: option, label: option })),
-            { value: DISMISS, label: "Dismiss" },
-          ];
+        : options.map((option) => ({ value: option, label: option }));
     const list = new SelectList(items, Math.min(items.length, 8), {
       selectedPrefix: (value) => this.theme.fg("accent", value),
       selectedText: (value) => this.theme.fg("accent", value),
@@ -323,14 +302,11 @@ export class AgentsOverlay implements Component, Focusable {
   }
 
   private answer(question: PendingDialog, value: string): void {
-    if (question.request.method === "confirm") {
-      question.answer({ confirmed: value === "yes" });
-    } else if (value === DISMISS || !value.trim()) {
-      question.answer(CANCELLED);
-    } else {
-      question.answer({ value });
-    }
-    this.answerInput.setValue("");
+    question.answer(
+      question.request.method === "confirm"
+        ? { confirmed: value === "yes" }
+        : { value },
+    );
     this.notice = { text: "Answered.", error: false };
     this.updateFocus();
   }
@@ -611,17 +587,11 @@ export class AgentsOverlay implements Component, Focusable {
       if (message) {
         footer.push(...message.split("\n").map((line) => `   ${line}`));
       }
-      if (isChoice(question)) {
-        footer.push(...this.questionList(question).render(width));
-      } else {
-        footer.push(...this.answerInput.render(width));
-      }
+      footer.push(...this.questionList(question).render(width));
       footer.push(
         this.theme.fg(
           "dim",
-          isChoice(question)
-            ? " ↑↓ choose · Enter answer · PgUp/PgDn · Ctrl+X stop · Esc back"
-            : " Enter answer (empty dismisses) · PgUp/PgDn · Ctrl+X stop · Esc back",
+          " ↑↓ choose · Enter answer · PgUp/PgDn · Ctrl+X stop · Esc back",
         ),
       );
     } else if (active) {

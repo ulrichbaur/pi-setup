@@ -23,8 +23,6 @@ function fakeUI(answers: Record<string, unknown> = {}): {
   const ui = {
     select: record("select"),
     confirm: record("confirm"),
-    input: record("input"),
-    editor: record("editor"),
     notify: (...args: unknown[]) => calls.push({ method: "notify", args }),
   } as unknown as ParentUI;
   return { ui, calls };
@@ -38,8 +36,6 @@ test("child dialogs reach the parent UI with the subagent's label", async () => 
   const { ui, calls } = fakeUI({
     select: "Allow",
     confirm: true,
-    input: "main",
-    editor: undefined,
   });
   const enqueue = createDialogQueue();
   const forward = (request: Record<string, unknown>) =>
@@ -53,12 +49,6 @@ test("child dialogs reach the parent UI with the subagent's label", async () => 
     await forward({ method: "confirm", title: "Run?", message: "rm x" }),
     { confirmed: true },
   );
-  assert.deepEqual(await forward({ method: "input", title: "Branch?" }), {
-    value: "main",
-  });
-  assert.deepEqual(await forward({ method: "editor", title: "Edit" }), {
-    cancelled: true,
-  });
   assert.deepEqual(await forward({ method: "unknown" }), { cancelled: true });
 
   assert.deepEqual(calls[0], {

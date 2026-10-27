@@ -188,7 +188,7 @@ test("a long list keeps the selected run visible and fits the overlay", () => {
 });
 
 test("a waiting question is marked and answered in the overlay", async () => {
-  const { registry, overlay, type, sent, screen } = setup();
+  const { registry, overlay, sent, screen } = setup();
   const run = fakeRun("worker-00000001");
   registry.add(run);
   const live = new AbortController().signal;
@@ -215,23 +215,17 @@ test("a waiting question is marked and answered in the overlay", async () => {
 
   const select = registry.ask(
     run,
-    { method: "select", title: "Which database?", options: ["Postgres"] },
+    {
+      method: "select",
+      title: "Which database?",
+      options: ["Postgres", "SQLite"],
+    },
     60_000,
     live,
   );
   overlay.handleInput(KEYS.down);
   overlay.handleInput(KEYS.enter);
-  assert.deepEqual(await select, { cancelled: true });
-
-  const input = registry.ask(
-    run,
-    { method: "input", title: "Branch?" },
-    60_000,
-    live,
-  );
-  type("main");
-  overlay.handleInput(KEYS.enter);
-  assert.deepEqual(await input, { value: "main" });
+  assert.deepEqual(await select, { value: "SQLite" });
   assert.match(screen(), /Answered\./);
   assert.match(screen(), /Enter steer/);
 });

@@ -51,8 +51,7 @@
 
 ## Dialogs
 
-- With a parent UI, a child's `select`, `confirm`, `input`, and `editor` requests
-  open in the parent, titled with the session id.
+- With a parent UI, a child's `select` and `confirm` requests open in the parent, titled with the session id.
   Notifications appear there too; other UI requests are ignored.
 - A background run opens no dialog over the user's work.
   Its approvals wait in `/agents`, marked on the run, and the user gets a notice.
@@ -61,8 +60,7 @@
 - One dialog is open at a time, across all subagents.
   A dialog whose child exited, whose run was aborted,
   or whose timeout passed while it waited is never shown.
-  An open one, except the editor, closes when its child exits
-  or its run is aborted.
+  An open one closes when its child exits or its run is aborted.
 - Without a parent UI, every dialog gets a cancel response.
 - With a parent UI, the parent starts `safe_bash` with `--safe-bash-ask`.
   The user then decides about every command

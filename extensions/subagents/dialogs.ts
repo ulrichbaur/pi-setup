@@ -3,7 +3,7 @@ import { CANCELLED, type DialogAnswer, type RpcRecord } from "./rpc.ts";
 
 export type ParentUI = Pick<
   ExtensionUIContext,
-  "select" | "confirm" | "input" | "editor" | "notify"
+  "select" | "confirm" | "notify"
 >;
 
 export function createDialogQueue(): <T>(task: () => Promise<T>) => Promise<T> {
@@ -51,14 +51,6 @@ export async function forwardDialog(
         return {
           confirmed: await ui.confirm(title, text(request.message), options),
         };
-      case "input": {
-        const value = await ui.input(title, text(request.placeholder), options);
-        return value === undefined ? CANCELLED : { value };
-      }
-      case "editor": {
-        const value = await ui.editor(title, text(request.prefill));
-        return value === undefined ? CANCELLED : { value };
-      }
       default:
         return CANCELLED;
     }

@@ -30,8 +30,6 @@ function fakeUI() {
       return true;
     },
     select: async () => undefined,
-    input: async () => undefined,
-    editor: async () => undefined,
   };
   return { ui, calls };
 }

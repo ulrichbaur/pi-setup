@@ -85,22 +85,22 @@ test("a queued question resolves once: answered, timed out, or aborted", async (
   assert.equal(run.pendingDialogs.length, 0);
   assert.equal(changes, 2);
 
-  const timedOut = registry.ask(run, { method: "input" }, 10, live);
+  const timedOut = registry.ask(run, { method: "confirm" }, 10, live);
   assert.deepEqual(await timedOut, { cancelled: true });
   const childTimeout = registry.ask(
     run,
-    { method: "input", timeout: 10 },
+    { method: "confirm", timeout: 10 },
     60_000,
     live,
   );
   assert.deepEqual(await childTimeout, { cancelled: true });
 
   const stop = new AbortController();
-  const aborted = registry.ask(run, { method: "input" }, 60_000, stop.signal);
+  const aborted = registry.ask(run, { method: "confirm" }, 60_000, stop.signal);
   stop.abort();
   assert.deepEqual(await aborted, { cancelled: true });
   assert.deepEqual(
-    await registry.ask(run, { method: "input" }, 60_000, stop.signal),
+    await registry.ask(run, { method: "confirm" }, 60_000, stop.signal),
     { cancelled: true },
   );
   assert.equal(run.pendingDialogs.length, 0);

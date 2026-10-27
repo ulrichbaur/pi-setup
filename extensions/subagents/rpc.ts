@@ -7,7 +7,7 @@ import { isRecord } from "../../lib/is-record.ts";
 /** A stdout record other than a command response. */
 export type RpcRecord = Record<string, unknown>;
 
-const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
+const DIALOG_METHODS = new Set(["select", "confirm"]);
 const STDERR_LIMIT = 16_000;
 
 /**
