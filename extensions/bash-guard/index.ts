@@ -8,6 +8,11 @@ import {
   type BashRisk,
   formatFindings,
 } from "../../lib/bash-policy.ts";
+import {
+  DECISIONS_PATH,
+  type DecisionRecord,
+  recordDecision,
+} from "./decisions.ts";
 import { BashReviewComponent } from "./review.ts";
 import { registerBashGuardCommand } from "./stats.ts";
 
@@ -68,14 +73,43 @@ async function promptForCommand(
   return { run: false, rejectReason: await promptForRejectReason(ctx) };
 }
 
-export default function bashGuard(pi: ExtensionAPI): void {
+export default function bashGuard(
+  pi: ExtensionAPI,
+  decisionsPath: string = DECISIONS_PATH,
+): void {
   pi.registerFlag("bash-guard-auto-allow", {
     description:
       "Allow flagged bash commands when interactive confirmation is unavailable",
     type: "boolean",
     default: false,
   });
-  registerBashGuardCommand(pi);
+  registerBashGuardCommand(pi, decisionsPath);
+
+  // A failed write must never stop the guard, but the user learns of it.
+  const record = (
+    ctx: ExtensionContext,
+    outcome: DecisionRecord["outcome"],
+    risk: BashRisk,
+    rejectReason?: string,
+  ) => {
+    try {
+      recordDecision(
+        {
+          time: new Date().toISOString(),
+          outcome,
+          findings: risk.findings,
+          ...(rejectReason ? { rejectReason } : {}),
+        },
+        decisionsPath,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `bash-guard could not record a decision in ${decisionsPath}: ${message}`,
+        "warning",
+      );
+    }
+  };
 
   const recentlyAborted = new Map<string, RecentAbort>();
   pi.on("tool_call", async (event, ctx) => {
@@ -91,6 +125,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
       previousAbort !== undefined &&
       Date.now() - previousAbort.at < ABORT_REMEMBER_MS
     ) {
+      record(ctx, "repeat", risk);
       const rejectReason = previousAbort.rejectReason
         ? ` The user's rejection reason was: ${previousAbort.rejectReason}.`
         : "";
@@ -102,6 +137,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
 
     if (!ctx.hasUI) {
       if (pi.getFlag("bash-guard-auto-allow") === true) return;
+      record(ctx, "blocked", risk);
       return {
         block: true,
         reason: `Blocked by bash-guard because confirmation is unavailable:\n${formatFindings(risk.findings)}`,
@@ -110,6 +146,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
 
     // The user is never asked about a command they cannot judge as a whole.
     if (risk.complex) {
+      record(ctx, "blocked", risk);
       return {
         block: true,
         reason: `Blocked by bash-guard: this command is too complex to review as a whole, and it contains risky steps:\n${formatFindings(risk.findings)}\nRun each risky step as its own simple command, so the user can review it.`,
@@ -117,6 +154,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
     }
 
     const result = await promptForCommand(ctx, command, risk);
+    record(ctx, result.run ? "ran" : "rejected", risk, result.rejectReason);
     if (result.run) return;
     recentlyAborted.set(abortKey, {
       at: Date.now(),

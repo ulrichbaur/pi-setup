@@ -45,7 +45,17 @@
 
 ## Stats
 
-- `/bash-guard stats` reads every saved session and pairs each bash call
+- Each decision about a flagged command is appended to
+  `bash-guard/decisions.jsonl` below Pi's agent directory:
+  approved, rejected with the user's reason, a repeat blocked,
+  or blocked without asking.
+  A record keeps the findings, not the whole command.
+- A failed write shows a warning and never changes the decision.
+- `/bash-guard stats` reports the recorded decisions first.
+  Logs from other machines can be passed as arguments and are counted together.
+  A log line that cannot be read is counted and named, not fatal,
+  because the log is a record, not configuration.
+- It then reads every saved session and pairs each bash call
   with its result: it ran, the user rejected it, or the guard blocked it.
   Pi records no decision itself, so the outcome comes from the result text.
 - The current policy classifies each command, so the report shows

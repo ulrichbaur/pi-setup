@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+  formatRecorded,
   formatReport,
   inferDecisions,
   registerBashGuardCommand,
@@ -94,6 +95,40 @@ test("the report counts a forked call once and groups by reason", () => {
   );
 });
 
+test("recorded decisions are reported as approvals and rejections", () => {
+  const finding = (command: string, reason: string) => [{ command, reason }];
+  assert.equal(
+    formatRecorded(
+      [
+        {
+          time: "2026-10-27T09:00:00.000Z",
+          outcome: "ran",
+          findings: finding("rm a.txt", "rm deletes files"),
+        },
+        {
+          time: "2026-11-02T09:00:00.000Z",
+          outcome: "rejected",
+          findings: finding("rm b.txt", "rm deletes files"),
+          rejectReason: "keep b",
+        },
+      ],
+      ["/here.jsonl", "/work.jsonl"],
+    ),
+    [
+      "Recorded decisions from 2026-10-27 to 2026-11-02 in /here.jsonl, /work.jsonl:",
+      "All flagged commands: 1 approved, 1 rejected",
+      "By reason:",
+      "  rm deletes files: 1 approved, 1 rejected",
+      "Your rejection reasons:",
+      '  "keep b" for rm b.txt',
+    ].join("\n"),
+  );
+  assert.equal(
+    formatRecorded([], ["/here.jsonl"]),
+    "No decisions recorded yet in /here.jsonl.",
+  );
+});
+
 test("/bash-guard completes stats and explains its usage", async () => {
   let name = "";
   let command:
@@ -102,12 +137,15 @@ test("/bash-guard completes stats and explains its usage", async () => {
         handler(args: string, ctx: unknown): Promise<void>;
       }
     | undefined;
-  registerBashGuardCommand({
-    registerCommand: (registered: string, options: typeof command) => {
-      name = registered;
-      command = options;
-    },
-  } as unknown as ExtensionAPI);
+  registerBashGuardCommand(
+    {
+      registerCommand: (registered: string, options: typeof command) => {
+        name = registered;
+        command = options;
+      },
+    } as unknown as ExtensionAPI,
+    "/unused.jsonl",
+  );
   assert.equal(name, "bash-guard");
   assert.deepEqual(
     command?.getArgumentCompletions("st")?.map((item) => item.label),
@@ -120,7 +158,7 @@ test("/bash-guard completes stats and explains its usage", async () => {
   await command?.handler("", ctx);
   await command?.handler("status", ctx);
   assert.deepEqual(notices, [
-    "Usage: /bash-guard stats",
-    "Usage: /bash-guard stats",
+    "Usage: /bash-guard stats [decision logs from other machines]",
+    "Usage: /bash-guard stats [decision logs from other machines]",
   ]);
 });

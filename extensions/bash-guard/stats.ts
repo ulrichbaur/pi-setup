@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import {
   type ExtensionAPI,
   SessionManager,
@@ -6,9 +8,11 @@ import {
 import { analyzeBashCommand } from "../../lib/bash-policy.ts";
 import { isRecord } from "../../lib/is-record.ts";
 import { parseSessionFile } from "../../lib/session-file.ts";
-
-/** What happened to a bash call, read from its tool result. */
-export type GuardOutcome = "ran" | "rejected" | "repeat" | "blocked";
+import {
+  type DecisionRecord,
+  type GuardOutcome,
+  readDecisions,
+} from "./decisions.ts";
 
 export type InferredDecision = {
   callId: string;
@@ -83,11 +87,45 @@ const emptyTally = (): Tally => ({
   blocked: 0,
 });
 
-function tallyText({ ran, rejected, repeat, blocked }: Tally): string {
-  const parts = [`${ran} ran`, `${rejected} rejected`];
+/** `ranWord` is "approved" where a run is known to be the user's choice. */
+function tallyText(
+  { ran, rejected, repeat, blocked }: Tally,
+  ranWord = "ran",
+): string {
+  const parts = [`${ran} ${ranWord}`, `${rejected} rejected`];
   if (repeat) parts.push(`${repeat} repeats blocked`);
   if (blocked) parts.push(`${blocked} blocked without asking`);
   return parts.join(", ");
+}
+
+function countReasons(
+  byReason: Map<string, Tally>,
+  reasons: Iterable<string>,
+  outcome: GuardOutcome,
+): void {
+  for (const reason of new Set(reasons)) {
+    const tally = byReason.get(reason) ?? emptyTally();
+    tally[outcome] += 1;
+    byReason.set(reason, tally);
+  }
+}
+
+function reasonLines(byReason: Map<string, Tally>, ranWord = "ran"): string[] {
+  if (byReason.size === 0) return [];
+  const sorted = [...byReason].sort(
+    ([, a], [, b]) => b.ran + b.rejected - (a.ran + a.rejected),
+  );
+  return [
+    "By reason:",
+    ...sorted.map(
+      ([reason, tally]) => `  ${reason}: ${tallyText(tally, ranWord)}`,
+    ),
+  ];
+}
+
+function dayRange(days: string[]): string {
+  days.sort();
+  return days.length ? ` from ${days[0]} to ${days.at(-1)}` : "";
 }
 
 /**
@@ -118,11 +156,11 @@ export function formatReport(
     } else {
       (risk.complex ? complex : simple)[decision.outcome] += 1;
       if (!risk.complex) {
-        for (const reason of new Set(risk.findings.map((f) => f.reason))) {
-          const tally = byReason.get(reason) ?? emptyTally();
-          tally[decision.outcome] += 1;
-          byReason.set(reason, tally);
-        }
+        countReasons(
+          byReason,
+          risk.findings.map((finding) => finding.reason),
+          decision.outcome,
+        );
       }
     }
     if (decision.rejectReason) {
@@ -131,23 +169,13 @@ export function formatReport(
     }
   }
 
-  days.sort();
-  const range = days.length ? ` from ${days[0]} to ${days.at(-1)}` : "";
   const lines = [
-    `bash-guard decisions in ${sessionCount} sessions${range}, read from tool results:`,
+    `bash-guard decisions in ${sessionCount} sessions${dayRange(days)}, read from tool results:`,
     `Commands the current policy asks about: ${tallyText(simple)}`,
     `Complex commands it now blocks: ${tallyText(complex)}`,
     `Commands it no longer flags: ${tallyText(unflagged)}`,
   ];
-  if (byReason.size) {
-    lines.push("By reason:");
-    const sorted = [...byReason].sort(
-      ([, a], [, b]) => b.ran + b.rejected - (a.ran + a.rejected),
-    );
-    for (const [reason, tally] of sorted) {
-      lines.push(`  ${reason}: ${tallyText(tally)}`);
-    }
-  }
+  lines.push(...reasonLines(byReason));
   if (reasons.length) lines.push("Your rejection reasons:", ...reasons);
   lines.push(
     '"Ran" also counts sessions without bash-guard and commands an older policy did not flag.',
@@ -159,24 +187,96 @@ export function formatReport(
   return lines.join("\n");
 }
 
-const USAGE = "Usage: /bash-guard stats";
+/** The exact decisions bash-guard recorded, from one or more logs. */
+export function formatRecorded(
+  records: readonly DecisionRecord[],
+  sources: readonly string[],
+): string {
+  if (records.length === 0) {
+    return `No decisions recorded yet in ${sources.join(", ")}.`;
+  }
+  const total = emptyTally();
+  const byReason = new Map<string, Tally>();
+  const reasons: string[] = [];
+  for (const record of records) {
+    total[record.outcome] += 1;
+    countReasons(
+      byReason,
+      record.findings.map((finding) => finding.reason),
+      record.outcome,
+    );
+    if (record.rejectReason) {
+      const steps = record.findings.map((finding) => finding.command);
+      reasons.push(`  "${record.rejectReason}" for ${steps.join("; ")}`);
+    }
+  }
+  const days = records.map((record) => record.time.slice(0, 10));
+  return [
+    `Recorded decisions${dayRange(days)} in ${sources.join(", ")}:`,
+    `All flagged commands: ${tallyText(total, "approved")}`,
+    ...reasonLines(byReason, "approved"),
+    ...(reasons.length ? ["Your rejection reasons:", ...reasons] : []),
+  ].join("\n");
+}
 
-export function registerBashGuardCommand(pi: ExtensionAPI): void {
+function expandHome(path: string): string {
+  return path === "~" || path.startsWith("~/")
+    ? `${homedir()}${path.slice(1)}`
+    : path;
+}
+
+/** Reads the local log and any logs given as arguments, such as a copy from another machine. */
+function recordedSection(
+  paths: string[],
+  decisionsPath: string,
+  cwd: string,
+): string {
+  const extra = paths.map((path) => resolve(cwd, expandHome(path)));
+  const records: DecisionRecord[] = [];
+  const problems: string[] = [];
+  for (const path of [decisionsPath, ...extra]) {
+    try {
+      const log = readDecisions(path);
+      if (!log) {
+        if (path !== decisionsPath) problems.push(`${path}: file not found`);
+        continue;
+      }
+      records.push(...log.records);
+      if (log.unreadable) {
+        problems.push(`${path}: ${log.unreadable} lines could not be read`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      problems.push(`${path}: ${message}`);
+    }
+  }
+  return [formatRecorded(records, [decisionsPath, ...extra]), ...problems].join(
+    "\n",
+  );
+}
+
+const USAGE = "Usage: /bash-guard stats [decision logs from other machines]";
+
+export function registerBashGuardCommand(
+  pi: ExtensionAPI,
+  decisionsPath: string,
+): void {
   pi.registerCommand("bash-guard", {
     description:
-      "`stats` shows how often flagged bash commands ran or were rejected",
+      "`stats` shows how often flagged bash commands were approved or rejected",
     getArgumentCompletions: (prefix) =>
-      "stats".startsWith(prefix)
+      "stats ".startsWith(prefix)
         ? [
             {
-              value: "stats",
+              value: "stats ",
               label: "stats",
-              description: "Ran and rejected counts, by reason",
+              description: "Approvals and rejections, by reason",
             },
           ]
         : null,
     handler: async (args, ctx) => {
-      if (args.trim() !== "stats") {
+      const [action, ...paths] = args.trim().split(/\s+/).filter(Boolean);
+      if (action !== "stats") {
         ctx.ui.notify(USAGE, "warning");
         return;
       }
@@ -195,7 +295,10 @@ export function registerBashGuardCommand(pi: ExtensionAPI): void {
           errors.push(`${session.path}: ${message}`);
         }
       }
-      ctx.ui.notify(formatReport(decisions, sessions.length, errors), "info");
+      ctx.ui.notify(
+        `${recordedSection(paths, decisionsPath, ctx.cwd)}\n\n${formatReport(decisions, sessions.length, errors)}`,
+        "info",
+      );
     },
   });
 }

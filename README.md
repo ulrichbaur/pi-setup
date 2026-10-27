@@ -138,8 +138,11 @@ A multi-line or otherwise complex command with a risky step is blocked
 instead of shown, and the model is asked to run that step on its own.
 Interactive sessions can approve or block commands and optionally provide a
 reason when they abort one.
-`/bash-guard stats` shows how often flagged commands ran or were rejected
-in your saved sessions, by reason, with the reasons you gave. Non-interactive sessions fail closed unless
+Each decision is recorded in `bash-guard/decisions.jsonl` below the agent directory.
+`/bash-guard stats` shows how often flagged commands were approved or rejected,
+by reason, with the reasons you gave, and estimates the same from older sessions.
+Pass a copied log from another machine, as in `/bash-guard stats ~/work-decisions.jsonl`,
+to count both together. Non-interactive sessions fail closed unless
 `bash-guard-auto-allow` is enabled. The subagents extension reuses this
 policy in its `safe_bash` tool.
 

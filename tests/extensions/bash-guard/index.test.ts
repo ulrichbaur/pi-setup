@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, test } from "node:test";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { readDecisions } from "../../../extensions/bash-guard/decisions.ts";
 import bashGuard from "../../../extensions/bash-guard/index.ts";
+
+// Every harness records into its own log here, never the user's agent directory.
+const logs = mkdtempSync(join(tmpdir(), "bash-guard-decisions-"));
+after(() => rmSync(logs, { recursive: true, force: true }));
 
 type ToolCallHandler = (
   event: {
@@ -16,7 +25,10 @@ type ToolCallHandler = (
   ctx: ExtensionContext,
 ) => Promise<{ block: true; reason: string } | undefined>;
 
-function createGuardHarness(autoAllow = false) {
+function createGuardHarness(
+  autoAllow = false,
+  decisionsPath = join(logs, `${randomUUID()}.jsonl`),
+) {
   let handler: ToolCallHandler | undefined;
   let flagName: string | undefined;
   const pi = {
@@ -33,7 +45,7 @@ function createGuardHarness(autoAllow = false) {
       handler = registered;
     },
   } as unknown as ExtensionAPI;
-  bashGuard(pi);
+  bashGuard(pi, decisionsPath);
   assert.equal(flagName, "bash-guard-auto-allow");
   assert.ok(handler);
   return handler;
@@ -172,4 +184,59 @@ test("bash-guard blocks a complex command with a risky step and names it", async
     await handler(bashCall("set -e\nmkdir /tmp/t\nls /tmp/t"), context),
     undefined,
   );
+});
+
+test("every decision is recorded with its findings", async () => {
+  const path = join(logs, "recorded.jsonl");
+  const handler = createGuardHarness(false, path);
+  let approve = false;
+  const context = {
+    hasUI: true,
+    mode: "rpc",
+    ui: {
+      confirm: async () => approve,
+      input: async () => "not now",
+    },
+  } as unknown as ExtensionContext;
+
+  await handler(bashCall("git rebase main"), context);
+  await handler(bashCall("git rebase main"), context);
+  approve = true;
+  await handler(bashCall("rm notes.txt"), context);
+  await handler(bashCall("ls\nrm -rf build"), context);
+  await handler(bashCall("ls"), context);
+
+  const recorded = readDecisions(path)?.records.map(
+    ({ outcome, findings, rejectReason }) => ({
+      outcome,
+      steps: findings.map((finding) => finding.command),
+      rejectReason,
+    }),
+  );
+  assert.deepEqual(recorded, [
+    {
+      outcome: "rejected",
+      steps: ["git rebase main"],
+      rejectReason: "not now",
+    },
+    { outcome: "repeat", steps: ["git rebase main"], rejectReason: undefined },
+    { outcome: "ran", steps: ["rm notes.txt"], rejectReason: undefined },
+    { outcome: "blocked", steps: ["rm -rf build"], rejectReason: undefined },
+  ]);
+});
+
+test("a decision that cannot be recorded warns and still decides", async () => {
+  const notices: string[] = [];
+  // A path below a file cannot be created.
+  const handler = createGuardHarness(false, "/dev/null/decisions.jsonl");
+  const context = {
+    hasUI: true,
+    mode: "rpc",
+    ui: {
+      confirm: async () => true,
+      notify: (message: string) => notices.push(message),
+    },
+  } as unknown as ExtensionContext;
+  assert.equal(await handler(bashCall("rm notes.txt"), context), undefined);
+  assert.match(notices[0] ?? "", /could not record a decision in \/dev\/null/);
 });
