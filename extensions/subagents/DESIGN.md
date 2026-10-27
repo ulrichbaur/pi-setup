@@ -139,10 +139,9 @@
 - The saved tool result lists which runs started, not their progress.
   A snapshot would show them running forever after a reload.
 - When all runs of the call end, one custom message carries the results.
-  With `deliverEach`, each run's result is its own message as soon as
-  that run ends, headed with its agent and its position in the call.
-  Each run then has its own delivery token for shutdown.
-  It starts a turn when the parent is idle
+  For results that arrive one by one, the model starts each task
+  in its own background call.
+  The message starts a turn when the parent is idle
   and follows the current run when it is busy.
 - A session shutdown stops the background runs
   and cancels their delivery, so a late result never reaches another session.

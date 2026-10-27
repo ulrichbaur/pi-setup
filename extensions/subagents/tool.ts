@@ -75,7 +75,7 @@ export function extensionTool(
       "To continue an earlier subagent with its context, pass its session id and a follow-up task instead of restating the context.",
       "When a subagent result ends with a question, answer it yourself by continuing that subagent with its session id and your answer as the task. Ask the user only when you cannot answer it.",
       "Set background: true for long work you do not need right away. The tool returns at once, and the result arrives later as a message; continue with other work and do not poll for it.",
-      "With several background tasks whose results are useful on their own, set deliverEach: true to get each result as soon as its run ends.",
+      "For background tasks whose results are useful on their own, start each in its own background call, so each result arrives when its run ends.",
     ],
     parameters: Type.Object({
       agent: Type.Optional(
@@ -103,12 +103,6 @@ export function extensionTool(
             "Return at once and deliver the result later as a message",
         }),
       ),
-      deliverEach: Type.Optional(
-        Type.Boolean({
-          description:
-            "With background tasks, deliver each result when its run ends instead of one message when all end",
-        }),
-      ),
     }),
     async execute(
       _toolCallId: string,
@@ -119,7 +113,6 @@ export function extensionTool(
         cwd?: string;
         session?: string;
         background?: boolean;
-        deliverEach?: boolean;
       },
       signal: AbortSignal | undefined,
       onUpdate:
@@ -222,31 +215,15 @@ export function extensionTool(
       };
 
       if (params.background) {
-        const each = params.deliverEach === true && runs.length > 1;
         // The runs outlive this tool call, so its signal must not stop them.
         const background = { ...context, signal: undefined };
-        const changed = () => registry.changed();
-        if (each) {
-          // One token per run, so a shutdown cancels every pending result.
-          const tokens = runs.map(() => delivery.start());
-          void runAll(plans, runs, limiter, background, changed, (result, i) =>
-            delivery.deliver(
-              tokens[i],
-              { mode: "single", results: [result] },
-              `Background subagent result (${result.agent}, task ${i + 1} of ${runs.length})`,
-            ),
-          );
-        } else {
-          const token = delivery.start();
-          void runAll(plans, runs, limiter, background, changed).then(
-            (results) => delivery.deliver(token, { mode, results }),
-          );
-        }
+        const token = delivery.start();
+        void runAll(plans, runs, limiter, background, () =>
+          registry.changed(),
+        ).then((results) => delivery.deliver(token, { mode, results }));
         const started = runs.map((run) => run.result);
         return {
-          content: [
-            { type: "text" as const, text: backgroundText(started, each) },
-          ],
+          content: [{ type: "text" as const, text: backgroundText(started) }],
           details: {
             mode,
             background: true,

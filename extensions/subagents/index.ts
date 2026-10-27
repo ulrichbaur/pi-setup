@@ -43,13 +43,13 @@ export default function subagents(
       pending.add(token);
       return token;
     },
-    deliver(token, details, heading = "Background subagent result") {
+    deliver(token, details) {
       pending.delete(token);
       if (token.cancelled) return;
       pi.sendMessage(
         {
           customType: RESULT_MESSAGE_TYPE,
-          content: `${heading}:\n\n${combinedText(details)}`,
+          content: `Background subagent result:\n\n${combinedText(details)}`,
           display: true,
           details,
         },

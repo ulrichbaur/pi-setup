@@ -534,7 +534,6 @@ export async function runAll(
   limiter: Limiter,
   context: RunContext,
   update: () => void,
-  onRunEnd?: (result: AgentResult, index: number) => void,
 ): Promise<AgentResult[]> {
   return Promise.all(
     plans.map(async (plan, index) => {
@@ -557,7 +556,6 @@ export async function runAll(
         run.result.output ||= `Error: ${run.result.progress.error}`;
       }
       update();
-      onRunEnd?.(run.result, index);
       return run.result;
     }),
   );

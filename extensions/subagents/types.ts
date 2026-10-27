@@ -79,9 +79,5 @@ export const RESULT_MESSAGE_TYPE = "subagent-result";
  */
 export interface Delivery {
   start(): { cancelled: boolean };
-  deliver(
-    token: { cancelled: boolean },
-    details: SubagentDetails,
-    heading?: string,
-  ): void;
+  deliver(token: { cancelled: boolean }, details: SubagentDetails): void;
 }

@@ -180,11 +180,9 @@ export function combinedText(details: SubagentDetails): string {
     .join("\n\n---\n\n");
 }
 
-export function backgroundText(results: AgentResult[], each: boolean): string {
+export function backgroundText(results: AgentResult[]): string {
   const ids = results.map((result) => result.sessionId).join(", ");
-  const arrival = each
-    ? "Each result arrives as its own message when its run ends"
-    : `The result arrives as a message when ${results.length > 1 ? "all of them end" : "the run ends"}`;
+  const arrival = `The result arrives as a message when ${results.length > 1 ? "all of them end" : "the run ends"}`;
   return `Started in the background: ${ids}. ${arrival}. Continue with other work; do not wait or poll for it. The user can follow it with /agents.`;
 }
 
