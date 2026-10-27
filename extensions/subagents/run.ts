@@ -5,18 +5,14 @@ import { basename, join } from "node:path";
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
+  type ExtensionUIContext,
   truncateHead,
 } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "../../lib/is-record.ts";
 import { CUSTOM_TOOL_EXTENSIONS, findAgent } from "./agents.ts";
-import {
-  forwardDialog,
-  forwardNotification,
-  type ParentUI,
-} from "./dialogs.ts";
 import type { Limiter } from "./limiter.ts";
-import { type DialogHandler, RpcChild, type RpcRecord } from "./rpc.ts";
-import type { RunRegistry, SubagentRun } from "./runs.ts";
+import { RpcChild, type RpcRecord } from "./rpc.ts";
+import type { SubagentRun } from "./runs.ts";
 import {
   findSession,
   newSessionId,
@@ -27,7 +23,6 @@ import {
   sessionArguments,
   sessionName,
 } from "./sessions.ts";
-import { ASK_FLAG } from "./tools/safe-bash.ts";
 import {
   applyTranscriptEvent,
   contentText,
@@ -223,7 +218,6 @@ export function subagentArguments(
   selectedModel: string | undefined,
   thinkingLevel: string | undefined,
   sessionArgs: string[],
-  userAvailable: boolean,
 ): string[] {
   const args = ["--mode", "rpc", ...sessionArgs];
   args.push("--no-skills", "--no-extensions");
@@ -242,7 +236,6 @@ export function subagentArguments(
   if (thinkingLevel && thinkingLevel !== "off") {
     args.push("--thinking", thinkingLevel);
   }
-  if (userAvailable && tools.includes("safe_bash")) args.push(`--${ASK_FLAG}`);
   args.push("--append-system-prompt", systemPromptPath);
   return args;
 }
@@ -312,14 +305,23 @@ export interface RunContext {
   availableModels: ReadonlySet<string>;
   thinkingLevel: string | undefined;
   signal: AbortSignal | undefined;
-  // The parent UI, or undefined when no user can answer.
+  // The parent UI, or undefined when it has none.
   ui: ParentUI | undefined;
-  enqueueDialog: <T>(task: () => Promise<T>) => Promise<T>;
-  // Background runs queue their dialogs in /agents instead of opening them
-  // over the user's work.
-  background: boolean;
-  registry: RunRegistry;
-  approvalTimeoutMs: number;
+}
+
+export type ParentUI = Pick<ExtensionUIContext, "notify">;
+
+function forwardNotification(
+  ui: ParentUI,
+  request: RpcRecord,
+  label: string,
+): void {
+  const type =
+    request.notifyType === "warning" || request.notifyType === "error"
+      ? request.notifyType
+      : "info";
+  const message = typeof request.message === "string" ? request.message : "";
+  ui.notify(`${label}: ${message}`, type);
 }
 
 /**
@@ -385,39 +387,9 @@ async function runAgent(
         selectedModel,
         inheritThinkingLevel ? thinkingLevel : undefined,
         sessionArguments(target),
-        ui !== undefined,
       ),
     );
-    let onDialog: DialogHandler | undefined;
-    if (ui && context.background) {
-      onDialog = (request, childExited) => {
-        ui.notify(
-          `${target.id} is waiting for your answer. Open /agents to reply.`,
-          "info",
-        );
-        return context.registry.ask(
-          run,
-          request,
-          context.approvalTimeoutMs,
-          AbortSignal.any([signal, childExited]),
-        );
-      };
-    } else if (ui) {
-      onDialog = (request, childExited) =>
-        forwardDialog(
-          context.enqueueDialog,
-          ui,
-          request,
-          target.id,
-          AbortSignal.any([signal, childExited]),
-        );
-    }
-    const child = new RpcChild(
-      invocation.command,
-      invocation.args,
-      cwd,
-      onDialog,
-    );
+    const child = new RpcChild(invocation.command, invocation.args, cwd);
 
     run.child = child;
 

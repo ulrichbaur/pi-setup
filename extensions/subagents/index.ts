@@ -13,7 +13,6 @@ import {
 } from "./agents.ts";
 import { AgentsOverlay, type OverlayChoice } from "./agents-view.ts";
 import { loadConfig } from "./config.ts";
-import { createDialogQueue } from "./dialogs.ts";
 import { Limiter } from "./limiter.ts";
 import { openSubagentSession, returnToParent } from "./navigation.ts";
 import { combinedText, renderDetails } from "./render.ts";
@@ -64,7 +63,6 @@ export default function subagents(
     delivery,
     hideThinking,
     limiter: new Limiter(config.maxConcurrency),
-    enqueueDialog: createDialogQueue(),
   };
   pi.registerTool(extensionTool(config, agents, services));
 

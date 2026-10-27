@@ -5,18 +5,14 @@ import {
   Input,
   Key,
   matchesKey,
-  type SelectItem,
-  SelectList,
   type TUI,
   truncateToWidth,
 } from "@earendil-works/pi-tui";
 import { formatCost } from "../../lib/subagent-cost.ts";
-import { choices, text } from "./dialogs.ts";
 import { statusIcon } from "./render.ts";
 import {
   isActive,
   type MessageMode,
-  type PendingDialog,
   type RunRegistry,
   type SubagentRun,
 } from "./runs.ts";
@@ -45,7 +41,6 @@ export class AgentsOverlay implements Component, Focusable {
   private viewportHeight = 1;
   private notice: { text: string; error: boolean } | undefined;
   private readonly input = new Input({ prompt: "› " });
-  private answerList: { question: PendingDialog; list: SelectList } | undefined;
   private readonly border: DynamicBorder;
   private readonly separator: DynamicBorder;
   private readonly unsubscribe: () => void;
@@ -87,10 +82,7 @@ export class AgentsOverlay implements Component, Focusable {
   }
 
   private updateFocus(): void {
-    this.input.focused =
-      this.isFocused &&
-      this.view === "detail" &&
-      !this.selected?.pendingDialogs.length;
+    this.input.focused = this.isFocused && this.view === "detail";
   }
 
   handleInput(data: string): void {
@@ -169,7 +161,6 @@ export class AgentsOverlay implements Component, Focusable {
   private handleDetailInput(data: string): void {
     const run = this.selected;
     if (!run) return;
-    const question = run.pendingDialogs[0];
     if (matchesKey(data, Key.escape)) {
       this.view = "list";
       this.updateFocus();
@@ -180,8 +171,6 @@ export class AgentsOverlay implements Component, Focusable {
       this.openSession(run);
     } else if (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)) {
       this.scroll(data);
-    } else if (question) {
-      this.questionList(question).handleInput(data);
     } else if (matchesKey(data, Key.alt("enter"))) {
       this.send(this.input.getValue(), "followUp");
     } else if (isActive(run)) {
@@ -195,37 +184,6 @@ export class AgentsOverlay implements Component, Focusable {
     this.scrollFromEnd = 0;
     this.notice = undefined;
     this.input.setValue("");
-    this.updateFocus();
-  }
-
-  private questionList(question: PendingDialog): SelectList {
-    if (this.answerList?.question === question) return this.answerList.list;
-    const items: SelectItem[] =
-      question.request.method === "confirm"
-        ? [
-            { value: "yes", label: "Yes" },
-            { value: "no", label: "No" },
-          ]
-        : choices(question.request).map((value) => ({ value, label: value }));
-    const list = new SelectList(items, Math.min(items.length, 8), {
-      selectedPrefix: (value) => this.theme.fg("accent", value),
-      selectedText: (value) => this.theme.fg("accent", value),
-      description: (value) => this.theme.fg("muted", value),
-      scrollInfo: (value) => this.theme.fg("dim", value),
-      noMatch: (value) => this.theme.fg("warning", value),
-    });
-    list.onSelect = (item) => this.answer(question, item.value);
-    this.answerList = { question, list };
-    return list;
-  }
-
-  private answer(question: PendingDialog, value: string): void {
-    question.answer(
-      question.request.method === "confirm"
-        ? { confirmed: value === "yes" }
-        : { value },
-    );
-    this.notice = { text: "Answered.", error: false };
     this.updateFocus();
   }
 
@@ -317,13 +275,12 @@ export class AgentsOverlay implements Component, Focusable {
             const marker =
               run === this.selected ? this.theme.fg("accent", "›") : " ";
             const task = run.result.task.replace(/\s+/g, " ");
-            const waiting = run.pendingDialogs.length
-              ? this.theme.fg("warning", " · waiting for your answer")
-              : run.result.question && !isActive(run)
+            const asks =
+              run.result.question && !isActive(run)
                 ? this.theme.fg("warning", " · asks the parent")
                 : "";
             return [
-              `${marker} ${this.summary(run)}${waiting}`,
+              `${marker} ${this.summary(run)}${asks}`,
               `    ${this.theme.fg("muted", truncateToWidth(task, Math.max(1, width - 4)))}`,
             ];
           });
@@ -393,8 +350,6 @@ export class AgentsOverlay implements Component, Focusable {
       );
     }
 
-    const active = isActive(run);
-    const question = run.pendingDialogs[0];
     this.updateFocus();
     const footer: string[] = [];
     if (this.notice) {
@@ -405,22 +360,7 @@ export class AgentsOverlay implements Component, Focusable {
         ),
       );
     }
-    if (question) {
-      const [first = "", ...rest] = text(question.request.title).split("\n");
-      footer.push(this.theme.fg("warning", ` ? ${first}`));
-      footer.push(...rest.map((line) => `   ${line}`));
-      const message = text(question.request.message);
-      if (message) {
-        footer.push(...message.split("\n").map((line) => `   ${line}`));
-      }
-      footer.push(...this.questionList(question).render(width));
-      footer.push(
-        this.theme.fg(
-          "dim",
-          " ↑↓ choose · Enter answer · PgUp/PgDn · Ctrl+X stop · Esc back",
-        ),
-      );
-    } else if (active) {
+    if (isActive(run)) {
       footer.push(...this.input.render(width));
       footer.push(
         this.theme.fg(

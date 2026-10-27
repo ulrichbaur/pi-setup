@@ -27,7 +27,6 @@ test("accepts inherited and preferred subagent models", () => {
       maxConcurrency: 3,
       maxParallelTasks: 6,
       sessionRetentionDays: 90,
-      backgroundApprovalTimeoutMinutes: 10,
       agents: {
         scout: { models: [] },
         worker: {
@@ -57,7 +56,6 @@ test("fills omitted subagent config fields with defaults", () => {
       maxConcurrency: DEFAULT_CONFIG.maxConcurrency,
       maxParallelTasks: DEFAULT_CONFIG.maxParallelTasks,
       sessionRetentionDays: 90,
-      backgroundApprovalTimeoutMinutes: 10,
       agents: { worker: { models: ["a/b"] } },
     },
   );

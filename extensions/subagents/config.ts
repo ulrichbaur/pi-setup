@@ -14,7 +14,6 @@ export interface SubagentConfig {
   maxConcurrency: number;
   maxParallelTasks: number;
   sessionRetentionDays: number;
-  backgroundApprovalTimeoutMinutes: number;
   agents: Record<string, AgentModelConfig>;
 }
 
@@ -22,7 +21,6 @@ export const DEFAULT_CONFIG: SubagentConfig = {
   maxConcurrency: 4,
   maxParallelTasks: 8,
   sessionRetentionDays: 90,
-  backgroundApprovalTimeoutMinutes: 10,
   agents: {},
 };
 
@@ -89,11 +87,6 @@ export function parseSubagentConfig(value: unknown): SubagentConfig {
       value.sessionRetentionDays,
       "sessionRetentionDays",
       DEFAULT_CONFIG.sessionRetentionDays,
-    ),
-    backgroundApprovalTimeoutMinutes: positiveInteger(
-      value.backgroundApprovalTimeoutMinutes,
-      "backgroundApprovalTimeoutMinutes",
-      DEFAULT_CONFIG.backgroundApprovalTimeoutMinutes,
     ),
     agents,
   };

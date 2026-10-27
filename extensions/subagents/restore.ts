@@ -26,7 +26,7 @@ export function resultKey(result: AgentResult): string {
 }
 
 function finishedRun(result: AgentResult): SubagentRun {
-  return { result, stop: new AbortController(), pendingDialogs: [] };
+  return { result, stop: new AbortController() };
 }
 
 /**

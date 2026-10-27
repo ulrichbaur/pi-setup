@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   createLineSplitter,
-  type DialogHandler,
   RpcChild,
   type RpcRecord,
 } from "../../../extensions/subagents/rpc.ts";
@@ -71,60 +70,6 @@ test("abort sends the abort command before closing stdin", async () => {
   await child.send({ type: "prompt", message: "Task: test" });
   assert.equal(await child.abort(), 0);
   assert.equal(child.stderr(), "commands: prompt,abort");
-});
-
-test("a dialog handler answers child dialogs; a failing one cancels", async () => {
-  const answers = async (onDialog: DialogHandler) => {
-    const child = new RpcChild(
-      process.execPath,
-      [FAKE_PI, "complete"],
-      process.cwd(),
-      onDialog,
-    );
-    const answer = new Promise<RpcRecord>((resolve) =>
-      child.onRecord((record) => {
-        if (record.type === "ui_answer") resolve(record);
-      }),
-    );
-    await child.send({ type: "prompt", message: "Task: test" });
-    const { response } = await answer;
-    await child.close();
-    return response;
-  };
-
-  const seen: RpcRecord[] = [];
-  assert.deepEqual(
-    await answers(async (request) => {
-      seen.push(request);
-      return { confirmed: true };
-    }),
-    { type: "extension_ui_response", id: "dialog-1", confirmed: true },
-  );
-  assert.equal(seen[0].title, "Allow?");
-  assert.deepEqual(
-    await answers(async () => {
-      throw new Error("no UI");
-    }),
-    { type: "extension_ui_response", id: "dialog-1", cancelled: true },
-  );
-});
-
-test("the exit signal aborts when the child exits", async () => {
-  let exitSignal: AbortSignal | undefined;
-  const child = new RpcChild(
-    process.execPath,
-    [FAKE_PI, "complete"],
-    process.cwd(),
-    (_request, childExited) => {
-      exitSignal = childExited;
-      return new Promise(() => {});
-    },
-  );
-  await child.send({ type: "prompt", message: "Task: test" });
-  while (!exitSignal) await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(exitSignal.aborted, false);
-  await child.close();
-  assert.equal(exitSignal.aborted, true);
 });
 
 test("close reports the signal it had to send", async () => {

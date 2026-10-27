@@ -68,7 +68,7 @@ const script: Script = (messages) => {
     if (asked) {
       return { tool: "subagent", args: { session: asked[1], task: "blue" } };
     }
-    if (scenario?.includes("approve")) return { text: "Parent waits" };
+    if (scenario?.includes("block")) return { text: "Parent waits" };
     return {
       text: scenario?.includes("ask") ? "Parent done asking" : "Parent done",
     };
@@ -79,7 +79,7 @@ const script: Script = (messages) => {
   if (scenario?.includes("ask")) {
     return { tool: "subagent", args: { agent: "tester", task: "TASK ask" } };
   }
-  if (scenario?.includes("approve")) {
+  if (scenario?.includes("block")) {
     return {
       tool: "subagent",
       args: { agent: "tester", task: "TASK delete", background: true },
@@ -229,31 +229,19 @@ test("a subagent asks the parent, which resumes it with the answer", {
   assert.doesNotMatch(done, /waiting for your answer/);
 });
 
-test("a background approval is answered in /agents", { skip }, async () => {
-  type("SCENARIO approve");
+test("a background run's risky command is blocked", { skip }, async () => {
+  type("SCENARIO block");
   press("Enter");
   await waitFor(/Parent waits/);
-  await waitFor(/is waiting for your answer/);
+  await waitFor(/Background subagent finished/);
+  const final = await waitFor(/Parent got the result/);
+  assert.match(final, /Tester was blocked/);
+  assert.equal(existsSync(join(root, "project", "notes.txt")), true);
 
   type("/agents");
   press("Enter");
   const list = await waitFor(/Subagents \(4\)/);
-  assert.match(list, /tester-\w+ · running .*waiting for your answer/);
-
-  press("Enter");
-  const question = await waitFor(/\? .*Run this command\?/);
-  assert.match(question, /rm notes\.txt/);
-  assert.match(question, /Allow this kind for this run/);
-  press("Enter");
-  await waitFor(/Answered\./);
-  // tmux would merge quick Escapes into one sequence; wait for each step.
-  press("Escape");
-  await waitFor(/Subagents \(4\)/);
+  assert.match(list, /tester-\w+ · completed/);
   press("Escape");
   await waitFor(/^(?![\s\S]*Subagents \(4\))/);
-
-  await waitFor(/Background subagent finished/);
-  const final = await waitFor(/Parent got the result/);
-  assert.match(final, /Tester deleted the file/);
-  assert.equal(existsSync(join(root, "project", "notes.txt")), false);
 });

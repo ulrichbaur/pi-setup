@@ -166,16 +166,12 @@ or per project in `.pi/agents/` (loaded only in trusted projects).
 The most specific file wins by name: project over yours over the package.
 The researcher receives only the web tools.
 The worker receives file tools and `safe_bash`.
-When you can answer, `safe_bash` asks you before any command that bash-guard
-or the headless policy flags. For milder commands, such as deleting a single
-file, you can allow that kind of command for the rest of the run.
-Otherwise it blocks common destructive system commands and parent-session
-Git actions.
+`safe_bash` blocks every command that bash-guard or the headless policy flags.
+A subagent that needs such a command asks the parent,
+which runs it under bash-guard, so you still decide.
 Subagents never ask you questions. An agent that needs an answer calls
 `ask_parent`: its run ends with the question, and the parent model answers
 by continuing the subagent's session, asking you only when it cannot.
-Approval dialogs from `safe_bash` open in your session, one at a time,
-titled with the subagent's session id.
 Agent definitions cannot request the raw `bash` tool.
 The extension depends on the web-fetch and web-search extensions and on the
 shared bash policy in `lib/`. Removing one of them makes the agents that use
@@ -191,9 +187,6 @@ With `background: true`, the tool returns at once.
 The result arrives later as a message and starts a model turn,
 or waits for the current one to end.
 Background runs stop when the session closes; their sessions stay saved.
-A background run never opens a dialog over your work.
-Its approvals wait in `/agents`, and you get a notice.
-An unanswered one is cancelled after 10 minutes, and `safe_bash` blocks the command.
 `/agents` lists this session's subagent runs, even while one runs.
 Open a running subagent to follow it, send it a message
 (Enter steers, Alt+Enter queues a follow-up), or stop it with Ctrl+X.
@@ -208,7 +201,7 @@ The optional config lives in `~/.pi/agent/subagents.json` (or below
 `PI_CODING_AGENT_DIR` when set) and overrides the built-in defaults:
 at most 4 subagents running at once across the session,
 at most 8 parallel tasks in one call, sessions kept for 90 days,
-background approvals cancelled after 10 minutes, and no model preferences.
+and no model preferences.
 Older sessions are deleted when Pi starts.
 Each agent may set a `models` array of `provider/model` IDs.
 The first available preferred model is selected. An agent without an available
@@ -221,7 +214,6 @@ is an error.
   "maxConcurrency": 4,
   "maxParallelTasks": 8,
   "sessionRetentionDays": 90,
-  "backgroundApprovalTimeoutMinutes": 10,
   "agents": {
     "worker": {
       "models": ["provider/model-id", "other-provider/fallback-model"]

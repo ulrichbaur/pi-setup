@@ -57,5 +57,4 @@ test("saved tool results and delivered messages become finished runs", () => {
       ["worker-00000002", "completed", undefined],
     ],
   );
-  assert.ok(runs.every((run) => run.pendingDialogs.length === 0));
 });

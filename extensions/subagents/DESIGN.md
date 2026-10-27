@@ -15,7 +15,7 @@
   A malformed file fails the load with its path.
 - Project agents depend on the working directory and on project trust,
   so they load at `session_start`, and the tool is registered again.
-  The limiter, dialog queue, and registry are shared across registrations.
+  The limiter and registry are shared across registrations.
 - In an untrusted project, project agents are skipped with a notice.
   A malformed project file skips them all with an error notice
   that names the file.
@@ -49,36 +49,25 @@
   because Pi's retry recovered.
   A retry that finally fails sets the run's error.
 
-## Dialogs
+## Safety and questions
 
-- With a parent UI, a child's `select` and `confirm` requests open in the parent, titled with the session id.
-  Notifications appear there too; other UI requests are ignored.
-- A background run opens no dialog over the user's work.
-  Its approvals wait in `/agents`, marked on the run, and the user gets a notice.
-  An approval is cancelled after `backgroundApprovalTimeoutMinutes` (default 10),
-  after the child's own timeout, or when the run stops.
-- One dialog is open at a time, across all subagents.
-  A dialog whose child exited, whose run was aborted,
-  or whose timeout passed while it waited is never shown.
-  An open one closes when its child exits or its run is aborted.
-- Without a parent UI, every dialog gets a cancel response.
-- With a parent UI, the parent starts `safe_bash` with `--safe-bash-ask`.
-  The user then decides about every command
-  that the headless or the interactive policy catches.
-  A refusal or a dismissed dialog blocks the command.
-  For a command the headless policy allows, the user can also allow
-  its kind, meaning its set of reasons, for the rest of the run.
-  Commands the headless policy blocks are asked about every time.
-  Without the flag, the headless policy decides alone.
+- Subagents have no user to ask.
+  Every child dialog gets a cancel response, so no child waits on one.
+  Child notifications appear in the parent, titled with the session id.
+- `safe_bash` blocks every command that the headless or the interactive policy catches.
+  The error names the reasons and tells the subagent to use a safer command
+  or to ask the agent that gave it the task.
+- A command the work needs but `safe_bash` blocks goes through the parent.
+  The subagent asks with `ask_parent`, and the parent runs the command
+  with its own Bash, where bash-guard asks the user.
 - Subagents do not ask the user questions.
   `ask_parent` ends the run with `terminate: true`, so the question
   is the run's last word, and the result tells the parent model
   to answer by continuing the session.
   A later assistant turn clears the question,
   because the run went on without the answer.
-- Only `safe_bash` approvals reach the user,
-  because a model approving its subagent's risky commands
-  is a weaker check than a person.
+- A model never approves its subagent's risky commands,
+  because that is a weaker check than a person.
 
 ## Transcript
 

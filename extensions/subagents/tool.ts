@@ -1,7 +1,6 @@
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SubagentConfig } from "./config.ts";
-import type { ParentUI } from "./dialogs.ts";
 import type { Limiter } from "./limiter.ts";
 import {
   backgroundText,
@@ -10,6 +9,7 @@ import {
   type Theme,
 } from "./render.ts";
 import {
+  type ParentUI,
   pendingResult,
   planRun,
   type RunContext,
@@ -46,8 +46,6 @@ export interface ToolServices {
   hideThinking: () => boolean;
   // One limit for every run of this session, background runs included.
   limiter: Limiter;
-  // Dialogs from all subagents share one queue, so only one is open at a time.
-  enqueueDialog: <T>(task: () => Promise<T>) => Promise<T>;
 }
 
 function agentLabel(agent: AgentDefinition): string {
@@ -61,7 +59,7 @@ export function extensionTool(
   agents: AgentDefinition[],
   services: ToolServices,
 ) {
-  const { registry, delivery, hideThinking, limiter, enqueueDialog } = services;
+  const { registry, delivery, hideThinking, limiter } = services;
   return {
     name: "subagent" as const,
     label: "Subagent",
@@ -183,7 +181,6 @@ export function extensionTool(
             : { agentSource: plan.agent.source }),
         },
         stop: new AbortController(),
-        pendingDialogs: [],
       }));
       const update = () => {
         registry.changed();
@@ -208,10 +205,6 @@ export function extensionTool(
         thinkingLevel: ctx.thinkingLevel,
         signal,
         ui: ctx.hasUI ? ctx.ui : undefined,
-        enqueueDialog,
-        background: params.background === true,
-        registry,
-        approvalTimeoutMs: config.backgroundApprovalTimeoutMinutes * 60_000,
       };
 
       if (params.background) {

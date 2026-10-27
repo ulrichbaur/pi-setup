@@ -7,7 +7,8 @@ import { isRecord } from "../../lib/is-record.ts";
 /** A stdout record other than a command response. */
 export type RpcRecord = Record<string, unknown>;
 
-const DIALOG_METHODS = new Set(["select", "confirm"]);
+// The extension UI requests that wait for a response.
+const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
 const STDERR_LIMIT = 16_000;
 
 /**
@@ -44,25 +45,10 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds).unref());
 }
 
-/** The answer to an extension dialog, without the response envelope. */
-export type DialogAnswer =
-  | { value: string }
-  | { confirmed: boolean }
-  | { cancelled: true };
-
-export const CANCELLED: DialogAnswer = { cancelled: true };
-
-export type DialogHandler = (
-  request: RpcRecord,
-  childExited: AbortSignal,
-) => Promise<DialogAnswer>;
-
-/** Dialogs without a handler, or whose handler fails, get a cancel response. */
+/** A subagent has no user to ask, so every child dialog gets a cancel response. */
 export class RpcChild {
   readonly exited: Promise<number>;
   private readonly child: ChildProcessByStdio<Writable, Readable, Readable>;
-  private readonly onDialog: DialogHandler | undefined;
-  private readonly exitController = new AbortController();
   private readonly listeners = new Set<(record: RpcRecord) => void>();
   private readonly pending = new Map<
     string,
@@ -73,13 +59,7 @@ export class RpcChild {
   private forcedSignal: NodeJS.Signals | undefined;
   private hasExited = false;
 
-  constructor(
-    command: string,
-    args: string[],
-    cwd: string,
-    onDialog?: DialogHandler,
-  ) {
-    this.onDialog = onDialog;
+  constructor(command: string, args: string[], cwd: string) {
     this.child = spawn(command, args, {
       cwd,
       shell: false,
@@ -100,7 +80,6 @@ export class RpcChild {
       const finish = (code: number) => {
         if (this.hasExited) return;
         this.hasExited = true;
-        this.exitController.abort();
         const detail = this.stderr();
         const error = new Error(
           `Subagent process exited${detail ? `: ${detail}` : ""}`,
@@ -210,20 +189,12 @@ export class RpcChild {
       typeof record.id === "string" &&
       DIALOG_METHODS.has(String(record.method))
     ) {
-      this.answerDialog(record.id, record);
+      this.write({
+        type: "extension_ui_response",
+        id: record.id,
+        cancelled: true,
+      });
     }
     for (const listener of this.listeners) listener(record);
-  }
-
-  private answerDialog(id: string, request: RpcRecord): void {
-    const respond = (answer: DialogAnswer) =>
-      this.write({ type: "extension_ui_response", id, ...answer });
-    if (!this.onDialog) {
-      respond(CANCELLED);
-      return;
-    }
-    this.onDialog(request, this.exitController.signal).then(respond, () =>
-      respond(CANCELLED),
-    );
   }
 }
