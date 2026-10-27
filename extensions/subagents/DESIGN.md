@@ -54,7 +54,8 @@
 - Subagents have no user to ask.
   Every child dialog gets a cancel response, so no child waits on one.
   Child notifications appear in the parent, titled with the session id.
-- `safe_bash` blocks every command that the headless or the interactive policy catches.
+- `safe_bash` blocks every command that the shared bash policy catches,
+  including the parent-session Git operations bash-guard lets the user run.
   The error names the reasons and tells the subagent to use a safer command
   or to ask the agent that gave it the task.
 - A command the work needs but `safe_bash` blocks goes through the parent.

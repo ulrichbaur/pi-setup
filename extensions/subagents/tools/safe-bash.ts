@@ -2,18 +2,13 @@ import {
   createBashToolDefinition,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import {
-  analyzeBashCommand,
-  headlessBlockReason,
-} from "../../../lib/bash-policy.ts";
+import { subagentRisk } from "../../../lib/bash-policy.ts";
 
-/** A subagent has no user to ask, so whatever either policy catches is blocked. */
+/** A subagent has no user to ask, so every risky command is blocked. */
 export function commandBlockReason(command: string): string | null {
-  const reasons = new Set(analyzeBashCommand(command)?.reasons);
-  const headless = headlessBlockReason(command);
-  if (headless) reasons.add(headless);
-  if (reasons.size === 0) return null;
-  return `Command blocked by safe_bash: ${[...reasons].join("; ")}. Use a safer command, or ask the agent that gave you this task to run it.`;
+  const risk = subagentRisk(command);
+  if (!risk) return null;
+  return `Command blocked by safe_bash: ${risk.reasons.join("; ")}. Use a safer command, or ask the agent that gave you this task to run it.`;
 }
 
 export default function safeBash(pi: ExtensionAPI): void {

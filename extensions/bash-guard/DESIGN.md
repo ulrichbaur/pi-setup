@@ -1,12 +1,12 @@
 # Bash Guard
 
 - Interactive policy: which commands the user confirms before they run.
-- Headless policy: which commands a subagent may never run.
-- Both policies are columns of one rule table in `lib/bash-policy.ts`.
+- Subagent policy: which commands a subagent may never run.
+- Both policies read one rule table in `lib/bash-policy.ts`.
   The table lives outside the extension because the subagents extension
-  consumes its headless column; this note still owns the semantics.
-  Each row matches one command shape, carries an interactive severity
-  (or none), and says whether a headless worker may run it.
+  uses it too; this note still owns the semantics.
+  Each row matches one command shape and carries an interactive severity,
+  or none when only subagents are stopped.
   Add a command once and decide both answers in the same place.
 
 ## Interactive policy
@@ -31,17 +31,10 @@
 - A command the user aborted is blocked for one minute, whitespace
   changes included, and the abort reason is passed back to the model.
 
-## Headless policy
+## Subagent policy
 
-- Block catastrophic operations outright: recursive deletion, disk
-  formatting, system power, infrastructure teardown, piping downloads
-  to a shell.
-- Block operations that belong to the parent session:
-  `git commit`, `git pull`, `git push`, and `git stash`.
+- A subagent has no user to ask, so its `safe_bash` tool blocks every row.
+- Rows without a severity cover operations that belong to the parent session:
+  `git commit`, `git pull`, and `git stash`.
+  The user may run them freely, but a subagent never does.
 - Everything else runs without confirmation.
-- The subagents extension reuses this policy in its `safe_bash` tool
-  when no user can answer.
-  When a user can answer, `safe_bash` asks about every command
-  that either policy catches, and a refusal blocks it.
-  A command this policy allows can be allowed by kind for the rest of the run;
-  a command it blocks is asked about every time.

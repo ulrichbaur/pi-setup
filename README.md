@@ -166,7 +166,8 @@ or per project in `.pi/agents/` (loaded only in trusted projects).
 The most specific file wins by name: project over yours over the package.
 The researcher receives only the web tools.
 The worker receives file tools and `safe_bash`.
-`safe_bash` blocks every command that bash-guard or the headless policy flags.
+`safe_bash` blocks every command that bash-guard flags, and also
+`git commit`, `git pull`, and `git stash`, which belong to the parent session.
 A subagent that needs such a command asks the parent,
 which runs it under bash-guard, so you still decide.
 Subagents never ask you questions. An agent that needs an answer calls

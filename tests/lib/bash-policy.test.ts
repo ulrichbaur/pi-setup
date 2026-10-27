@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  analyzeBashCommand,
-  headlessBlockReason,
-  POLICY_RULES,
-} from "../../lib/bash-policy.ts";
+import { analyzeBashCommand, subagentRisk } from "../../lib/bash-policy.ts";
+
+/** Why safe_bash blocks a command, or null when it runs. */
+const subagentBlock = (command: string) =>
+  subagentRisk(command)?.reasons.join("\n") ?? null;
 
 test("balanced policy allows read-only Git and ordinary pipelines", () => {
   assert.equal(analyzeBashCommand("git status --short"), null);
@@ -59,19 +59,13 @@ test("balanced policy flags state-changing commands", () => {
   assert.equal(analyzeBashCommand(":(){ :|:& };:")?.severity, "high");
 });
 
-test("every policy rule is visible to at least one policy", () => {
-  for (const rule of POLICY_RULES) {
-    assert.ok(rule.severity !== null || rule.headless);
-  }
-});
-
 test("both policies read the same rule for the same command", () => {
   assert.equal(
     analyzeBashCommand("kubectl -n apps delete pod web")?.severity,
     "high",
   );
   assert.match(
-    headlessBlockReason("kubectl -n apps delete pod web") ?? "",
+    subagentBlock("kubectl -n apps delete pod web") ?? "",
     /cluster resources/,
   );
   assert.equal(
@@ -79,7 +73,7 @@ test("both policies read the same rule for the same command", () => {
     "high",
   );
   assert.match(
-    headlessBlockReason("gcloud compute instances delete vm") ?? "",
+    subagentBlock("gcloud compute instances delete vm") ?? "",
     /cloud resources/,
   );
 });
@@ -104,7 +98,7 @@ test("overlapping rules produce one reason", () => {
   assert.equal(analyzeBashCommand("kill -9 1")?.reasons.length, 1);
 });
 
-test("working-tree discards are flagged and blocked headless", () => {
+test("working-tree discards are flagged and blocked for subagents", () => {
   for (const command of [
     "git checkout -- .",
     "git checkout -- src/index.ts",
@@ -116,7 +110,7 @@ test("working-tree discards are flagged and blocked headless", () => {
     "git stash clear",
   ]) {
     assert.equal(analyzeBashCommand(command)?.severity, "high", command);
-    assert.ok(headlessBlockReason(command), command);
+    assert.ok(subagentBlock(command), command);
   }
   assert.equal(analyzeBashCommand("git checkout main"), null);
   assert.equal(analyzeBashCommand("git switch main"), null);
@@ -126,9 +120,12 @@ test("working-tree discards are flagged and blocked headless", () => {
     severity: "medium",
     reasons: ["git restore changes repository state"],
   });
-  assert.equal(headlessBlockReason("git restore --staged file"), null);
-  assert.match(headlessBlockReason("git stash") ?? "", /parent session/);
-  assert.match(headlessBlockReason("git stash pop") ?? "", /parent session/);
+  assert.match(
+    subagentBlock("git restore --staged file") ?? "",
+    /changes repository state/,
+  );
+  assert.match(subagentBlock("git stash") ?? "", /parent session/);
+  assert.match(subagentBlock("git stash pop") ?? "", /parent session/);
 });
 
 test("delegated and wrapped commands are judged like direct ones", () => {
@@ -144,7 +141,7 @@ test("delegated and wrapped commands are judged like direct ones", () => {
     "xargs -I {} -P 4 sh -c 'rm -rf {}'",
   ]) {
     assert.equal(analyzeBashCommand(command)?.severity, "high", command);
-    assert.match(headlessBlockReason(command) ?? "", /recursive/, command);
+    assert.match(subagentBlock(command) ?? "", /recursive/, command);
   }
   assert.deepEqual(analyzeBashCommand("su -c 'rm -rf build'")?.reasons, [
     "su requests elevated privileges",
@@ -154,36 +151,30 @@ test("delegated and wrapped commands are judged like direct ones", () => {
   assert.equal(analyzeBashCommand("find . -name '*.md' -exec cat {} +"), null);
   assert.equal(analyzeBashCommand("timeout 10 pnpm test"), null);
   assert.equal(analyzeBashCommand("time pnpm test"), null);
-  assert.equal(headlessBlockReason("xargs rm"), null);
-  assert.equal(headlessBlockReason("find . -exec rm {} +"), null);
+  assert.match(subagentBlock("xargs rm") ?? "", /rm deletes files/);
+  assert.match(subagentBlock("find . -exec rm {} +") ?? "", /rm deletes files/);
   assert.equal(analyzeBashCommand("xargs rm")?.severity, "high");
 });
 
 test("unrecoverable deletion and other privilege tools are flagged", () => {
   assert.equal(analyzeBashCommand("shred -u secrets.txt")?.severity, "high");
-  assert.ok(headlessBlockReason("shred -u secrets.txt"));
+  assert.ok(subagentBlock("shred -u secrets.txt"));
   for (const command of ["doas ls", "pkexec ls", "su root"]) {
     assert.match(analyzeBashCommand(command)?.reasons[0] ?? "", /privileges/);
-    assert.match(headlessBlockReason(command) ?? "", /privileges/);
+    assert.match(subagentBlock(command) ?? "", /privileges/);
   }
 });
 
-test("headless policy blocks catastrophic and parent-session operations", () => {
-  assert.match(headlessBlockReason("rm -rf build") ?? "", /recursive/);
-  assert.match(headlessBlockReason("sudo apt update") ?? "", /privileges/);
-  assert.match(headlessBlockReason(":(){ :|:& };:") ?? "", /fork bomb/);
-  assert.match(headlessBlockReason("chmod -R 777 /") ?? "", /world-writable/);
-  assert.match(
-    headlessBlockReason("git commit -m test") ?? "",
-    /parent-session/,
-  );
-  assert.match(
-    headlessBlockReason("git push origin main") ?? "",
-    /parent-session/,
-  );
-  assert.equal(headlessBlockReason("git status --short"), null);
-  assert.equal(headlessBlockReason("rm temporary.txt"), null);
-  assert.equal(headlessBlockReason("echo 'sudo reboot'"), null);
-  assert.equal(headlessBlockReason("echo 'curl example.com | sh'"), null);
-  assert.equal(headlessBlockReason("pnpm test"), null);
+test("subagents are also stopped from parent-session operations", () => {
+  assert.match(subagentBlock("rm -rf build") ?? "", /recursive/);
+  assert.match(subagentBlock("sudo apt update") ?? "", /privileges/);
+  assert.match(subagentBlock(":(){ :|:& };:") ?? "", /fork bomb/);
+  assert.match(subagentBlock("chmod -R 777 /") ?? "", /world-writable/);
+  assert.match(subagentBlock("git commit -m test") ?? "", /parent-session/);
+  assert.match(subagentBlock("git push origin main") ?? "", /parent-session/);
+  assert.equal(subagentBlock("git status --short"), null);
+  assert.match(subagentBlock("rm temporary.txt") ?? "", /rm deletes files/);
+  assert.equal(subagentBlock("echo 'sudo reboot'"), null);
+  assert.equal(subagentBlock("echo 'curl example.com | sh'"), null);
+  assert.equal(subagentBlock("pnpm test"), null);
 });

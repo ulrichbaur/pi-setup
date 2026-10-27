@@ -8,17 +8,15 @@ export type BashRisk = {
 };
 
 /**
- * One row of the shared policy table. The interactive guard and the headless
- * `safe_bash` tool evaluate the same rows and differ only in which columns
- * they read.
+ * One row of the shared policy table. The interactive guard asks the user
+ * about every row with a severity; the subagent `safe_bash` tool blocks
+ * every row.
  */
 export type PolicyRule = {
   /** Returns the reason when the rule applies to this command, otherwise null. */
   match(command: string, args: string[]): string | null;
-  /** Interactive rating. null means the user is not asked. */
+  /** Interactive rating. null means only subagents are stopped. */
   severity: BashRiskSeverity | null;
-  /** True when a headless worker must never run the command. */
-  headless: boolean;
 };
 
 type OperatorToken = {
@@ -347,17 +345,14 @@ const named =
 const FORK_BOMB: PolicyRule = {
   match: () => "the command contains a fork bomb",
   severity: "high",
-  headless: true,
 };
 const UNPARSEABLE: PolicyRule = {
   match: () => "the shell command could not be parsed safely",
   severity: "medium",
-  headless: true,
 };
 const DOWNLOAD_TO_SHELL: PolicyRule = {
   match: () => "downloaded content is piped to a shell",
   severity: "high",
-  headless: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -367,7 +362,6 @@ const DOWNLOAD_TO_SHELL: PolicyRule = {
 /**
  * Every row applies to one command segment after env prefixes are stripped.
  * A row with `severity: null` is invisible to the interactive guard.
- * A row with `headless: false` is allowed for a headless worker.
  * Rows are ordered so that the more specific reason comes first.
  */
 export const POLICY_RULES: readonly PolicyRule[] = [
@@ -378,58 +372,38 @@ export const POLICY_RULES: readonly PolicyRule[] = [
       named((command) => `${command} requests elevated privileges`),
     ),
     severity: "high",
-    headless: true,
   },
 
   // File deletion
   {
-    match: is("rm", (args) =>
-      isRecursive(args) ? "rm -r performs recursive file deletion" : null,
-    ),
-    severity: "high",
-    headless: true,
-  },
-  {
     match: is(["rm", "rmdir", "unlink"], (args, command) =>
-      command === "rm" && isRecursive(args) ? null : `${command} deletes files`,
+      command === "rm" && isRecursive(args)
+        ? "rm -r performs recursive file deletion"
+        : `${command} deletes files`,
     ),
     severity: "high",
-    headless: false,
   },
   {
     match: is("find", (args) =>
       args.includes("-delete") ? "find -delete can remove many files" : null,
     ),
     severity: "high",
-    headless: false,
   },
   {
     match: is("shred", always("shred destroys file contents beyond recovery")),
     severity: "high",
-    headless: true,
   },
 
   // Disks and volumes
   {
-    match: is("dd", (args) =>
-      args.some((argument) => argument.startsWith("of=/dev/"))
+    match: is("dd", (args) => {
+      const target = args.find((argument) => argument.startsWith("of="));
+      if (!target) return null;
+      return target.startsWith("of=/dev/")
         ? "dd writes to a raw disk"
-        : null,
-    ),
+        : "dd with an output target can overwrite data";
+    }),
     severity: "high",
-    headless: true,
-  },
-  {
-    match: is("dd", (args) =>
-      args.some(
-        (argument) =>
-          argument.startsWith("of=") && !argument.startsWith("of=/dev/"),
-      )
-        ? "dd with an output target can overwrite data"
-        : null,
-    ),
-    severity: "high",
-    headless: false,
   },
   {
     match: is(
@@ -437,30 +411,20 @@ export const POLICY_RULES: readonly PolicyRule[] = [
       named((command) => `${command} formats a filesystem`),
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: is("wipefs", always("wipefs removes disk signatures")),
     severity: "high",
-    headless: true,
-  },
-  {
-    match: is("diskutil", (args) =>
-      diskutilErases(args) ? "diskutil erases a disk" : null,
-    ),
-    severity: "high",
-    headless: true,
   },
   {
     match: is(
       ["diskutil", "hdiutil", "gpt", "asr", "pvcreate", "vgcreate", "lvcreate"],
       (args, command) =>
         command === "diskutil" && diskutilErases(args)
-          ? null
+          ? "diskutil erases a disk"
           : `${command} manages disks or volumes`,
     ),
     severity: "high",
-    headless: false,
   },
   {
     match: is(
@@ -468,17 +432,14 @@ export const POLICY_RULES: readonly PolicyRule[] = [
       named((command) => `${command} manages partition tables`),
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: is("cryptsetup", always("cryptsetup manages disk encryption")),
     severity: "high",
-    headless: true,
   },
   {
     match: is("zpool", always("zpool manages ZFS pools")),
     severity: "high",
-    headless: true,
   },
 
   // File metadata
@@ -489,7 +450,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: is("chown", (args) =>
@@ -498,7 +458,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: is(["chmod", "chown"], (args, command) =>
@@ -507,34 +466,23 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "medium",
-    headless: false,
   },
 
   // Processes and power
   {
-    match: is("kill", (args) =>
-      args.includes("-9") && args.includes("1")
+    match: is(["kill", "pkill", "killall"], (args, command) => {
+      if (!args.includes("-9")) return null;
+      return command === "kill" && args.includes("1")
         ? "kill -9 1 terminates the init process"
-        : null,
-    ),
+        : `${command} -9 terminates processes`;
+    }),
     severity: "high",
-    headless: true,
-  },
-  {
-    match: is(["kill", "pkill", "killall"], (args, command) =>
-      args.includes("-9") && !(command === "kill" && args.includes("1"))
-        ? `${command} -9 terminates processes`
-        : null,
-    ),
-    severity: "high",
-    headless: false,
   },
   {
     match: is(["kill", "pkill", "killall"], (args, command) =>
       args.includes("-9") ? null : `${command} terminates processes`,
     ),
     severity: "medium",
-    headless: false,
   },
   {
     match: is(
@@ -542,7 +490,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
       named((command) => `${command} changes system power state`),
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: is("systemctl", (args) =>
@@ -551,7 +498,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "medium",
-    headless: false,
   },
 
   // Infrastructure
@@ -562,14 +508,12 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: is("terraform", (args) =>
       args[0] === "destroy" ? "terraform destroy removes infrastructure" : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: is("aws", (args) =>
@@ -578,21 +522,18 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: is("gcloud", (args) =>
       args.includes("delete") ? "gcloud delete removes cloud resources" : null,
     ),
     severity: "high",
-    headless: true,
   },
 
   // Git: hard to recover
   {
     match: git("rm", always("git rm deletes files and stages their removal")),
     severity: "high",
-    headless: false,
   },
   {
     match: git("reset", (rest) =>
@@ -601,7 +542,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: git("clean", (rest) =>
@@ -610,7 +550,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: git("checkout", (rest) =>
@@ -619,7 +558,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: git("switch", (rest) =>
@@ -628,7 +566,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: git("restore", (rest) =>
@@ -637,7 +574,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : "git restore overwrites working-tree changes",
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: git("stash", (rest) =>
@@ -646,7 +582,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: git("push", (rest) =>
@@ -655,7 +590,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: git("reflog", (rest) =>
@@ -664,7 +598,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
   {
     match: git("gc", (rest) =>
@@ -673,7 +606,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "high",
-    headless: true,
   },
 
   // Git: parent-session operations
@@ -684,7 +616,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : "git push publishes to a remote (a parent-session operation)",
     ),
     severity: "medium",
-    headless: true,
   },
   {
     match: git(
@@ -692,7 +623,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
       (_, subcommand) => `git ${subcommand} is a parent-session operation`,
     ),
     severity: null,
-    headless: true,
   },
   {
     match: git("stash", (rest) =>
@@ -701,7 +631,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : "git stash moves the parent session's working-tree changes",
     ),
     severity: null,
-    headless: true,
   },
 
   // Git: recoverable through the index or reflog, but still worth a look
@@ -725,7 +654,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
       },
     ),
     severity: "medium",
-    headless: false,
   },
   {
     match: git("branch", (rest) =>
@@ -741,7 +669,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null,
     ),
     severity: "medium",
-    headless: false,
   },
   {
     match: git("tag", (rest) =>
@@ -756,7 +683,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : "git tag changes tag references",
     ),
     severity: "medium",
-    headless: false,
   },
   {
     match: git("remote", (rest) => {
@@ -766,7 +692,6 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : null;
     }),
     severity: "medium",
-    headless: false,
   },
   {
     match: git("config", (rest) =>
@@ -777,14 +702,12 @@ export const POLICY_RULES: readonly PolicyRule[] = [
         : "git config may change repository settings",
     ),
     severity: "medium",
-    headless: false,
   },
   {
     match: git("worktree", (rest) =>
       rest[0] === "list" ? null : "git worktree changes linked working trees",
     ),
     severity: "medium",
-    headless: false,
   },
 ];
 
@@ -794,8 +717,7 @@ export const POLICY_RULES: readonly PolicyRule[] = [
 
 /**
  * Parses the command and returns every matching rule the caller cares about.
- * Both policies share this walk; they differ only in the `applies` filter and
- * in how they summarize the matches.
+ * Both policies share this walk; they differ only in the `applies` filter.
  */
 function evaluate(
   command: string,
@@ -843,17 +765,12 @@ function summarizeRisk(matches: Match[]): BashRisk | null {
   };
 }
 
-/** Analyze an agent-issued bash command using the balanced interactive policy. */
-export function analyzeBashCommand(
-  command: string,
-  depth = 0,
-): BashRisk | null {
-  return summarizeRisk(
-    evaluate(command, depth, (rule) => rule.severity !== null),
-  );
+/** The rows the interactive guard asks the user about. */
+export function analyzeBashCommand(command: string): BashRisk | null {
+  return summarizeRisk(evaluate(command, 0, (rule) => rule.severity !== null));
 }
 
-/** Return why a command is forbidden in a non-interactive worker. */
-export function headlessBlockReason(command: string, depth = 0): string | null {
-  return evaluate(command, depth, (rule) => rule.headless)[0]?.reason ?? null;
+/** Every row, for subagents, which have no user to ask. */
+export function subagentRisk(command: string): BashRisk | null {
+  return summarizeRisk(evaluate(command, 0, () => true));
 }
