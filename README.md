@@ -7,10 +7,12 @@ Development requires Node.js 22.6 or newer and the pnpm version pinned in
 
 ## Structure
 
-- `extensions/` — TypeScript extensions
-- `lib/` — code shared by more than one extension
-- `themes/` — JSON themes
-- `tests/` — tests, mirroring the layout of `extensions/` and `lib/`
+- `extensions/`: TypeScript extensions
+- `lib/`: code shared by more than one extension
+- `themes/`: JSON themes
+- `tests/`: tests, mirroring the layout of `extensions/` and `lib/`;
+  end-to-end TUI tests live in `tests/tui/`
+- `scripts/hooks/`: the Git pre-commit hook
 
 ## Extensions
 
@@ -102,8 +104,8 @@ manually changing either file.
 ### Files
 
 `extensions/files/` provides `/files` (also `ctrl+shift+o`), a fuzzy-searchable
-browser over the current Git tree — tracked and untracked files with their Git
-status — plus files referenced or edited in the session. Dirty files sort
+browser over the current Git tree: tracked and untracked files with their Git
+status, plus files referenced or edited in the session. Dirty files sort
 first, then files changed this session, newest first. Selecting a file offers
 actions to add an `@path` mention to the prompt or copy the path to the
 clipboard. Renames keep their destination path, tracked symlinks keep their
@@ -138,13 +140,14 @@ A multi-line or otherwise complex command with a risky step is blocked
 instead of shown, and the model is asked to run that step on its own.
 Interactive sessions can approve or block commands and optionally provide a
 reason when they abort one.
+Non-interactive sessions fail closed unless `bash-guard-auto-allow` is enabled.
+The subagents extension reuses this policy in its `safe_bash` tool.
+
 Each decision is recorded in `bash-guard/decisions.jsonl` below the agent directory.
 `/bash-guard stats` shows how often flagged commands were approved or rejected,
 by reason, with the reasons you gave, and estimates the same from older sessions.
 Pass a copied log from another machine, as in `/bash-guard stats ~/work-decisions.jsonl`,
-to count both together. Non-interactive sessions fail closed unless
-`bash-guard-auto-allow` is enabled. The subagents extension reuses this
-policy in its `safe_bash` tool.
+to count both together.
 
 ### Save Markdown
 
@@ -172,8 +175,10 @@ It provides scout, researcher, and worker agents in isolated Pi processes.
 Add or override agents with Markdown files in `agents/` in the agent directory,
 or per project in `.pi/agents/` (loaded only in trusted projects).
 The most specific file wins by name: project over yours over the package.
-The researcher receives only the web tools.
+The scout reads code with `read`, `grep`, `find`, and `ls`.
+The researcher uses the web tools.
 The worker receives file tools and `safe_bash`.
+All three can ask the parent with `ask_parent`.
 `safe_bash` blocks every command that bash-guard flags, and also
 `git commit`, `git pull`, and `git stash`, which belong to the parent session.
 A subagent that needs such a command asks the parent,

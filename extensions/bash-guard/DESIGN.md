@@ -20,7 +20,9 @@
   such as `add`, `commit`, branch switches, `merge`, and `pull`.
   A `checkout`, `switch`, or `restore` that overwrites the working tree
   is not recoverable and is flagged like `reset --hard`.
-- Parse the command; never match on raw text.
+- Judge the parsed words, never the raw text.
+  Only shape checks read the text: a fork bomb, a heredoc,
+  and whether a command is complex.
   Follow `bash -c`, `eval`, and `su -c`; strip `env`, `nice`, `nohup`,
   `time`, `timeout`, `busybox`, `exec`, shell keywords, and variable prefixes;
   reduce a command path to its name; judge the command
