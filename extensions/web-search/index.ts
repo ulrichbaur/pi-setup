@@ -24,49 +24,63 @@ export interface BuiltSearchQuery {
   site?: string;
 }
 
-async function googleSearch(
+async function braveSearch(
   query: string,
   count: number,
   apiKey: string,
-  cseId: string,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-  const num = Math.min(count, 10);
-  const url = new URL("https://www.googleapis.com/customsearch/v1");
-  url.searchParams.set("key", apiKey);
-  url.searchParams.set("cx", cseId);
+  const url = new URL("https://api.search.brave.com/res/v1/web/search");
   url.searchParams.set("q", query);
-  url.searchParams.set("num", String(num));
+  url.searchParams.set("count", String(Math.min(count, 10)));
+  url.searchParams.set("result_filter", "web");
+  url.searchParams.set("text_decorations", "false");
 
-  const resp = await fetch(url.toString(), { signal });
+  const resp = await fetch(url.toString(), {
+    signal,
+    headers: {
+      Accept: "application/json",
+      "X-Subscription-Token": apiKey,
+    },
+  });
   if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Google API ${resp.status}: ${body.slice(0, 200)}`);
+    const body = (await resp.text()).replaceAll(apiKey, "[redacted]");
+    throw new Error(`Brave Search API ${resp.status}: ${body.slice(0, 200)}`);
   }
 
   const data = (await resp.json()) as {
-    items?: Array<{
-      title: string;
-      link: string;
-      snippet?: string;
-    }>;
+    web?: {
+      results?: Array<{ title: string; url: string; description?: string }>;
+    };
   };
-
-  if (!data.items || data.items.length === 0) return [];
-
-  return data.items.map((item) => ({
+  if (
+    !data ||
+    typeof data !== "object" ||
+    Array.isArray(data) ||
+    (data.web !== undefined &&
+      (!data.web || typeof data.web !== "object" || Array.isArray(data.web)))
+  ) {
+    throw new Error("Brave Search API returned an invalid response");
+  }
+  const results = data.web?.results === undefined ? [] : data.web.results;
+  if (
+    !Array.isArray(results) ||
+    results.some(
+      (item) =>
+        !item ||
+        typeof item.title !== "string" ||
+        typeof item.url !== "string" ||
+        (item.description !== undefined &&
+          typeof item.description !== "string"),
+    )
+  ) {
+    throw new Error("Brave Search API returned invalid web results");
+  }
+  return results.slice(0, count).map((item) => ({
     title: item.title,
-    url: item.link,
-    snippet: item.snippet?.replace(/\n/g, " ") ?? "",
+    url: item.url,
+    snippet: item.description?.replace(/\n/g, " ") ?? "",
   }));
-}
-
-function loadCredentials(): { apiKey: string; cseId: string } | null {
-  const apiKey =
-    process.env.GOOGLE_SEARCH_API_KEY ?? process.env.GOOGLE_API_KEY;
-  const cseId =
-    process.env.GOOGLE_CSE_ID ?? process.env.GOOGLE_CUSTOM_SEARCH_ENGINE_ID;
-  return apiKey && cseId ? { apiKey, cseId } : null;
 }
 
 function formatResults(results: SearchResult[]): string {
@@ -153,7 +167,7 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web via Google Custom Search API. Build one search per call from a base query string, exact phrases, exclusions, and an optional site. Returns title, URL, and snippet.",
+      "Search the web via Brave Search API. Build one search per call from a base query string, exact phrases, exclusions, and an optional site. Returns title, URL, and snippet.",
     promptSnippet:
       "Search the web via a query string plus optional exactPhrases, excludeTerms, and site. Use one tool call per search angle.",
     promptGuidelines: [
@@ -171,7 +185,7 @@ export default function (pi: ExtensionAPI) {
       exactPhrases: Type.Optional(
         Type.Array(Type.String(), {
           description:
-            "Exact phrases to match. Each item becomes a quoted phrase in the final Google query.",
+            "Exact phrases to match. Each item becomes a quoted phrase in the final Brave query.",
         }),
       ),
       excludeTerms: Type.Optional(
@@ -196,22 +210,16 @@ export default function (pi: ExtensionAPI) {
     }),
 
     async execute(_toolCallId, params: StructuredSearchArgs, signal) {
-      const creds = loadCredentials();
-      if (!creds) {
+      const apiKey = process.env.BRAVE_SEARCH_API_KEY?.trim();
+      if (!apiKey) {
         throw new Error(
-          "Missing Google Custom Search credentials. Set GOOGLE_SEARCH_API_KEY and GOOGLE_CSE_ID. See https://developers.google.com/custom-search/v1/introduction",
+          "Missing Brave Search API key. Set BRAVE_SEARCH_API_KEY before starting Pi. Get a key at https://api-dashboard.search.brave.com/",
         );
       }
 
       const count = params.count ?? 5;
       const built = buildSearchQuery(params);
-      const results = await googleSearch(
-        built.query,
-        count,
-        creds.apiKey,
-        creds.cseId,
-        signal,
-      );
+      const results = await braveSearch(built.query, count, apiKey, signal);
 
       return {
         content: [

@@ -157,9 +157,21 @@ An existing file is never overwritten.
 
 ### Web tools
 
-`extensions/web-search/` adds `web_search` through Google Custom Search.
-Set `GOOGLE_SEARCH_API_KEY` and `GOOGLE_CSE_ID` in the environment.
+`extensions/web-search/` adds `web_search` through Brave Search API.
+Create an API key with Web Search access at the [Brave API dashboard](https://api-dashboard.search.brave.com/).
+Set it in the environment before starting Pi:
+
+```bash
+export BRAVE_SEARCH_API_KEY="your-api-key"
+pi
+```
+
+Researcher inherits the same environment.
 The tool supports exact phrases, exclusions, site restrictions, and up to ten results.
+Brave handles these filters through search operators, which it documents as experimental.
+The API key is sent in a request header, not in the search URL.
+Google credentials are no longer used.
+Restart Pi after changing the environment; `/reload` does not import variables from another shell.
 
 `extensions/web-fetch/` adds `web_fetch` for HTML, text, and PDF content.
 It uses Readability for HTML.
