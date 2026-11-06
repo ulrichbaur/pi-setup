@@ -55,7 +55,10 @@ test("confirmation appends once to the exact existing draft; cancel and reopen l
     const context = {
       mode: "tui",
       cwd: directory,
-      sessionManager: { getBranch: () => [] },
+      sessionManager: {
+        getBranch: () =>
+          assert.fail("file discovery must not read session history"),
+      },
       ui: {
         notify() {},
         select() {

@@ -116,10 +116,13 @@ Run `/reload` after you change either file by hand.
 ### Files
 
 `extensions/files/` provides `/files`, also bound to `alt+o`.
-It is a fuzzy-searchable browser over the current Git tree:
-tracked and untracked files with their Git status,
-plus files referenced or edited in the session.
-Dirty files sort first, then files changed in this session, newest first.
+It is a fuzzy-searchable picker over the current Git repository:
+tracked and non-ignored untracked files with their Git status.
+Dirty files sort first, then paths sort alphabetically.
+Outside Git, it recursively lists every file under the working directory, including hidden and ignored files.
+It does not scan session history.
+Directories and special files are excluded.
+File symlinks keep their own paths, and directory symlinks are not traversed.
 
 Each opening starts with no files selected.
 Use arrows to navigate, Tab to toggle checkboxes, and type to filter.
@@ -133,9 +136,9 @@ Selection lasts only for that opening and does not read or update existing menti
 Delete mentions manually in the editor when you no longer need them.
 
 A renamed file keeps its destination path.
-A tracked symlink keeps its own path, not the path of its target.
-Failed edit or write tool calls do not count as session changes.
-The browser requires TUI mode.
+Deleted Git files and dangling symlinks remain selectable.
+Discovery failures show an error instead of an incomplete list.
+The picker requires TUI mode.
 
 ### Context
 
