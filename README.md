@@ -160,17 +160,19 @@ Responses and the output the model sees have explicit size limits.
 ### Subagents
 
 `extensions/subagents/` adds the `subagent` tool with single and parallel modes.
-It provides scout, researcher, and worker agents in isolated Pi processes.
+It provides scout, researcher, and analyst agents in isolated Pi processes.
 Add or override agents with Markdown files in `agents/` in the agent directory,
 or per project in `.pi/agents/`, which load only in trusted projects.
 The most specific file wins by name: project over yours over the package.
 
 The scout reads code with `read`, `grep`, `find`, and `ls`.
 The researcher uses the web tools.
-The worker receives file tools and `safe_bash`.
+The analyst independently investigates questions and assesses proposed solutions.
+It stays read-only with the same tools as the scout.
 All three can ask the parent with `ask_parent`.
 Agent definitions cannot request the raw `bash` tool.
 
+Custom agents can request file editing tools and `safe_bash`.
 `safe_bash` uses the command policy in `lib/bash-policy.ts`.
 It blocks file deletion, local rebases, process termination, and recursive metadata changes,
 as well as `git commit`, `git pull`, and `git stash`, which belong to the parent session.
@@ -221,6 +223,9 @@ Each agent may set a `models` array of `provider/model` IDs.
 The first preferred model that is available is selected.
 An agent without an available preferred model inherits the parent model and thinking level.
 A config entry for an agent without a matching package or user agent file is an error.
+The built-in worker is replaced by analyst.
+Rename `agents.worker` to `agents.analyst` unless you have a user agent named `worker`.
+There is no silent fallback to analyst, and existing config files are not changed.
 
 ```json
 {
@@ -228,7 +233,7 @@ A config entry for an agent without a matching package or user agent file is an 
   "maxParallelTasks": 8,
   "sessionRetentionDays": 90,
   "agents": {
-    "worker": {
+    "analyst": {
       "models": ["provider/model-id", "other-provider/fallback-model"]
     }
   }

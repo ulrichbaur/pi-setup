@@ -7,6 +7,15 @@
 
 ## Agents
 
+- Built-in agents are scout for codebase recon, researcher for web research,
+  and analyst for general-purpose independent analysis.
+  Analyst uses the same read-only tools as scout: `read`, `grep`, `find`, `ls`,
+  and `ask_parent`.
+  Custom agents can still request editing tools and `safe_bash`.
+- Analyst replaces the built-in worker without a name alias.
+  Rename `agents.worker` in `subagents.json` to `agents.analyst`
+  unless a user agent named `worker` exists.
+  Existing configuration is not rewritten.
 - Agents come from the package, from `agents/` in Pi's agent directory,
   and from the project's `.pi/agents/`.
   The most specific wins by name: project over user over package.

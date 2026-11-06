@@ -34,6 +34,10 @@ const { RESULT_MESSAGE_TYPE } = await import(
   "../../../extensions/subagents/types.ts"
 );
 const { fakeRun } = await import("./fake-run.ts");
+const { loadAgents } = await import("../../../extensions/subagents/agents.ts");
+const { parseSubagentConfig } = await import(
+  "../../../extensions/subagents/config.ts"
+);
 
 const theme = {
   fg: (_color: string, text: string) => text,
@@ -312,6 +316,34 @@ test("the subagent cost total covers saved and running runs", () => {
   near(lastCost(), 0.026);
 });
 
+test("worker config requires a user agent and never falls back to analyst", () => {
+  const config = parseSubagentConfig({
+    agents: { worker: { models: ["provider/model"] } },
+  });
+  assert.throws(
+    () => loadAgents(config),
+    /agents\.worker has no matching agent file/,
+  );
+  const workerFile = join(agentDir, "agents", "worker.md");
+  try {
+    writeFileSync(
+      workerFile,
+      "---\nname: worker\ndescription: custom worker\ntools: read, safe_bash\n---\nWork.",
+    );
+    const agents = loadAgents(config);
+    assert.deepEqual(
+      agents.find((agent) => agent.name === "worker")?.modelPreferences,
+      ["provider/model"],
+    );
+    assert.deepEqual(
+      agents.find((agent) => agent.name === "analyst")?.modelPreferences,
+      [],
+    );
+  } finally {
+    rmSync(workerFile);
+  }
+});
+
 test("project agents load in trusted projects and override by name", () => {
   const project = mkdtempSync(join(tmpdir(), "subagent-project-"));
   try {
@@ -342,7 +374,9 @@ test("project agents load in trusted projects and override by name", () => {
 
     const trusted = start(true);
     assert.match(trusted.description, /scout \[project\] \(knows this repo\)/);
-    assert.match(trusted.description, /worker \(/);
+    assert.match(trusted.description, /analyst \(/);
+    assert.match(trusted.description, /researcher \(/);
+    assert.doesNotMatch(trusted.description, /worker \(/);
     assert.deepEqual(trusted.notices, []);
 
     writeFileSync(join(project, ".pi", "agents", "bad.md"), "no frontmatter");
