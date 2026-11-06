@@ -215,6 +215,19 @@ test("a subagent asks the parent, which resumes it with the answer", {
   assert.match(done, /continues scout-/);
   assert.match(done, /Scout chose blue/);
   assert.doesNotMatch(done, /waiting for your answer/);
+  type("/agents");
+  press("Enter");
+  await waitFor(/Subagents \(2\)/);
+  press("Enter");
+  const history = await waitFor(/Finished: read-only/);
+  assert.match(history, /Task: TASK ask/);
+  assert.match(history, /Which color\?/);
+  assert.match(history, /Task: blue/);
+  assert.match(history, /Scout chose blue/);
+  press("Escape");
+  await waitFor(/Subagents \(2\)/);
+  press("Escape");
+  await waitFor(/^(?![\s\S]*Subagents \(2\))/);
 });
 
 test("a background run delivers and its transcript opens read-only", {
@@ -229,7 +242,7 @@ test("a background run delivers and its transcript opens read-only", {
 
   type("/agents");
   press("Enter");
-  const list = await waitFor(/Subagents \(4\)/);
+  const list = await waitFor(/Subagents \(3\)/);
   assert.match(list, /scout-\w+ · completed/);
   assert.doesNotMatch(list, /open session/);
   press("Enter");
@@ -241,9 +254,9 @@ test("a background run delivers and its transcript opens read-only", {
   assert.match(screen(), /Finished: read-only/);
   assert.doesNotMatch(screen(), /ignored input/);
   press("Escape");
-  await waitFor(/Subagents \(4\)/);
+  await waitFor(/Subagents \(3\)/);
   press("Escape");
-  await waitFor(/^(?![\s\S]*Subagents \(4\))/);
+  await waitFor(/^(?![\s\S]*Subagents \(3\))/);
 });
 
 test("a live transcript stays read-only and the selected run can be cancelled", {
@@ -254,7 +267,7 @@ test("a live transcript stays read-only and the selected run can be cancelled", 
   await waitFor(/Parent waits for live run/);
   type("/agents");
   press("Enter");
-  await waitFor(/Subagents \(5\)/);
+  await waitFor(/Subagents \(4\)/);
   press("Enter");
   const live = await waitFor(/Read-only · PgUp\/PgDn scroll · Ctrl\+X stop/);
   assert.match(live, /ls/);
@@ -265,7 +278,7 @@ test("a live transcript stays read-only and the selected run can be cancelled", 
   await waitFor(/Finished: read-only/);
   assert.match(screen(), /Stopped by the user/);
   press("Escape");
-  await waitFor(/Subagents \(5\)/);
+  await waitFor(/Subagents \(4\)/);
   press("Escape");
   await waitFor(/Parent got the result/);
 });

@@ -184,19 +184,25 @@ apart from your normal sessions.
 The tool result ends with `Session: <id>`.
 Pass that id as `session` with a follow-up `task` to continue the subagent with its earlier context.
 
-Expanding the tool result shows the subagent's whole conversation,
+Expanding a tool result shows only that run's conversation,
 live while it runs, with the same components as the main chat.
 With `background: true`, the tool returns at once.
 The result arrives later as a message and starts a model turn,
 or it waits for the current turn to end.
 Background runs stop when the session closes, and their sessions stay saved.
 
-`/agents` lists this session's subagent runs, even while one runs.
-Press Enter to inspect a live or finished transcript in read-only mode.
-PgUp/PgDn scroll, Ctrl+X stops the selected run, and Escape returns to the list or closes it.
+`/agents` shows one row per subagent session, even while it runs.
+Continuing after `ask_parent` updates the same row.
+Press Enter to inspect its continuous conversation, including earlier questions and parent answers.
+History stays visible during streaming and after completion or reload.
+PgUp/PgDn scroll, Ctrl+X stops that session's active run, and Escape returns to the list or closes it.
+Unreadable history or a session file over 10 MiB shows a warning instead of a transcript.
 There is no live steering or queued follow-up input.
 Continue a session through the parent model's `subagent` call instead.
-Each result and each `/agents` row shows what the run cost.
+Each tool result shows its run's cost.
+Each `/agents` row sums its retained runs once.
+The registry retains every active run and the 50 newest finished runs.
+Session grouping does not change the overall cost total.
 
 The optional config lives in `~/.pi/agent/subagents.json`,
 or below `PI_CODING_AGENT_DIR` when that variable is set.

@@ -368,6 +368,7 @@ async function runAgent(
   result.progress.status = "running";
   result.cwd = cwd;
   result.live = emptyTranscript();
+  if (target.kind === "resume") result.sessionFile = target.path;
   result.messageStart =
     target.kind === "resume" ? countMessageEntries(target.path) : 0;
   const startedAt = Date.now();

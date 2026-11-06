@@ -80,22 +80,37 @@
 - The saved result keeps the session file and the run's range of message
   entries, not the messages.
   Expanding it reads that range from the file.
-  A missing file shows a warning, and the result falls back to the final output.
+  A missing file or a file over 10 MiB shows a warning.
+  Expanded tool results fall back to the final output.
 - When a run ends, tool rows still showing a partial result get a final one,
   so their redraw timers stop.
 
 ## Overlay
 
-- `/agents` lists the subagent runs of this session, newest first.
-  It keeps every running run and the 50 newest finished ones.
+- `/agents` groups the registry into one display row per subagent session,
+  ordered by newest run first.
+  Results without a session id keep separate rows.
+  The registry still keeps every active run and the 50 newest finished runs.
+  Grouping does not mutate per-run results or cost-event bookkeeping.
+  The active run supplies the status and cancellation target;
+  otherwise the newest run supplies the status.
 - A reload or a session switch replaces the extension runtime,
   so `session_start` rebuilds the finished runs from the session branch:
   foreground tool results and delivered background results.
   A background run that never delivered ended with its session
   and shows as stopped.
   Extension commands run while Pi streams, so it opens during a run.
-- A run opens to its transcript, which follows new output
+- A session opens to its continuous transcript, which follows new output
   until the user scrolls up.
+  Resuming after `ask_parent` keeps the same row and selection.
+  Earlier questions and parent answers remain in chronological order.
+  While streaming, saved messages before the active run's `messageStart`
+  precede that run's RPC messages and partial response, without overlap.
+  After completion or restoration, the view reads from message zero
+  through the newest run's `messageEnd`.
+  A pending continuation shows the preceding saved history.
+  Unreadable history or a file over 10 MiB shows a visible warning.
+  Expanded tool results keep their individual run ranges.
 - Both running and finished transcripts are read-only.
   PgUp/PgDn scroll the transcript.
   There is no input line, steering, queued follow-up, or session switching.
@@ -104,7 +119,8 @@
 - Historical results retain custom-agent provenance and user messages for display.
   Historical editing and shell calls retain their transcript renderers,
   but these tools are not registered or available to children.
-- Ctrl+X stops one run.
+- Ctrl+X stops the selected session's active run, even if the detail view
+  opened before that run started.
   The other runs of the same tool call continue,
   and the stopped one fails with "Stopped by the user".
 
@@ -131,7 +147,11 @@
 
 ## Cost
 
-- Each result header and each `/agents` row shows the run's cost.
+- Each result header shows the run's cost.
+  Each `/agents` row sums the retained runs of its session once,
+  deduplicated by the same result key as cost events.
+  Tool counts and durations also sum those retained runs.
+  Evicted runs can still appear in the saved transcript but not in row totals.
 - The extension reports the total on the event bus channel
   `subagents:cost`, defined in `lib/subagent-cost.ts`.
   Other extensions only listen; none imports this one.

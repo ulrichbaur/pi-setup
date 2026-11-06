@@ -236,13 +236,28 @@ export function releaseTranscript(
   }
 }
 
+function requiredSessionFile(result: AgentResult): string {
+  if (!result.sessionFile)
+    throw new Error("Saved session history has no file path");
+  return result.sessionFile;
+}
+
 export function transcriptView(
   result: AgentResult,
   display: TranscriptDisplay,
+  sessionHistory = false,
 ): Container | undefined {
   const cwd = result.cwd ?? process.cwd();
   if (result.live) {
-    return renderTranscript(result.live.messages, {
+    const prefix =
+      sessionHistory && (result.sessionFile || (result.messageStart ?? 0) > 0)
+        ? loadTranscript(
+            requiredSessionFile(result),
+            0,
+            result.messageStart ?? 0,
+          )
+        : [];
+    return renderTranscript([...prefix, ...result.live.messages], {
       cwd,
       streaming: result.live.streaming,
       pendingResults: result.live.pendingResults,
@@ -253,7 +268,7 @@ export function transcriptView(
   return renderTranscript(
     loadTranscript(
       result.sessionFile,
-      result.messageStart ?? 0,
+      sessionHistory ? 0 : (result.messageStart ?? 0),
       result.messageEnd,
     ),
     { cwd, ...display },

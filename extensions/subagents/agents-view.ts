@@ -9,6 +9,7 @@ import {
 import { formatCost } from "../../lib/subagent-cost.ts";
 import { statusIcon } from "./render.ts";
 import { isActive, type RunRegistry, type SubagentRun } from "./runs.ts";
+import { sameSession, sessionRows } from "./session-view.ts";
 import { transcriptView } from "./transcript-view.ts";
 
 const OVERLAY_HEIGHT_FRACTION = 0.85;
@@ -71,6 +72,7 @@ export class AgentsOverlay implements Component {
       6,
       Math.floor(this.tui.terminal.rows * OVERLAY_HEIGHT_FRACTION),
     );
+    this.runs();
     const lines =
       this.view === "detail" && this.selected
         ? this.renderDetail(this.selected, width, maxHeight)
@@ -86,10 +88,10 @@ export class AgentsOverlay implements Component {
   }
 
   private runs(): SubagentRun[] {
-    const runs = this.registry.list();
-    if (!this.selected || !runs.includes(this.selected)) {
-      this.selected = runs[0];
-    }
+    const runs = sessionRows(this.registry.list());
+    const selected = this.selected;
+    this.selected =
+      (selected && runs.find((run) => sameSession(run, selected))) ?? runs[0];
     return runs;
   }
 
@@ -125,6 +127,7 @@ export class AgentsOverlay implements Component {
   }
 
   private handleDetailInput(data: string): void {
+    this.runs();
     const run = this.selected;
     if (!run) return;
     if (matchesKey(data, Key.escape)) {
@@ -219,7 +222,7 @@ export class AgentsOverlay implements Component {
     ];
     const selected = this.selected ? runs.indexOf(this.selected) : 0;
     const height = this.measureViewport(width, maxHeight, header, footer);
-    // Each run takes two lines.
+    // Each session takes two lines.
     const firstVisibleLine = Math.max(0, (selected + 1) * 2 - height);
     const visible = body.slice(firstVisibleLine, firstVisibleLine + height);
     return this.frame(width, header, visible, footer);
@@ -253,10 +256,14 @@ export class AgentsOverlay implements Component {
     const header = [` ${this.summary(run)}`];
     let lines: string[];
     try {
-      const transcript = transcriptView(run.result, {
-        invalidate: () => this.tui.requestRender(),
-        hideThinking: this.options.hideThinking(),
-      });
+      const transcript = transcriptView(
+        run.result,
+        {
+          invalidate: () => this.tui.requestRender(),
+          hideThinking: this.options.hideThinking(),
+        },
+        true,
+      );
       lines = transcript
         ? transcript.render(width)
         : (run.result.output || "(no output yet)")

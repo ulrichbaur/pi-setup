@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { sessionRows } from "../../../extensions/subagents/session-view.ts";
 import type { SubagentDetails } from "../../../extensions/subagents/types.ts";
 
 // The extension reads its config and resolves the agent directory when it
@@ -299,6 +300,9 @@ test("the subagent cost total covers saved and running runs", () => {
     assert.ok(Math.abs(actual - expected) < 1e-12, `${actual} != ${expected}`);
   const saved = fakeRun("scout-00000001", "completed").result;
   saved.usage.cost = 0.02;
+  saved.messageStart = 0;
+  saved.messageEnd = 3;
+  saved.question = "Which color?";
   const delivered = fakeRun("worker-00000002", "completed").result;
   delivered.usage.cost = 0.005;
   const savedToolResult = {
@@ -319,11 +323,17 @@ test("the subagent cost total covers saved and running runs", () => {
   handlers.session_start({}, ctx);
   near(lastCost(), 0.02);
 
-  const running = fakeRun("scout-00000003");
+  // Continuing the same session remains a separate cost event source.
+  const running = fakeRun("scout-00000001");
+  running.result.messageStart = 3;
   running.result.usage.cost = 0.001;
   registry.add(running);
   near(lastCost(), 0.021);
   const emitted = costs.length;
+  const rows = sessionRows(registry.list());
+  assert.equal(rows.length, 1);
+  near(rows[0].result.usage.cost, 0.021);
+  assert.equal(costs.length, emitted);
   registry.changed();
   assert.equal(costs.length, emitted);
 

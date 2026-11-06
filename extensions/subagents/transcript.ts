@@ -189,6 +189,8 @@ function parseMessageEntries(text: string): unknown[] {
   return messages;
 }
 
+const MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024;
+
 const fileCache = new Map<
   string,
   { mtimeMs: number; size: number; messages: unknown[] }
@@ -208,6 +210,11 @@ export function loadTranscript(
     stats = statSync(path);
   } catch {
     throw new Error(`${path}: session file no longer exists`);
+  }
+  if (stats.size > MAX_TRANSCRIPT_BYTES) {
+    throw new Error(
+      `${path}: transcript exceeds 10 MiB; inspect the session file directly`,
+    );
   }
   let cached = fileCache.get(path);
   if (
