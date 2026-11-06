@@ -391,8 +391,6 @@ async function runAgent(
     );
     const child = new RpcChild(invocation.command, invocation.args, cwd);
 
-    run.child = child;
-
     let settle = () => {};
     let settledRun = false;
     const settled = new Promise<void>((resolve) => {
@@ -403,8 +401,6 @@ async function runAgent(
     });
     child.onRecord((record) => {
       if (record.type === "agent_settled") {
-        // A message sent now would never run, so the child stops taking them.
-        run.child = undefined;
         settle();
         return;
       }
@@ -449,7 +445,6 @@ async function runAgent(
         error instanceof Error ? error.message : String(error);
     } finally {
       signal.removeEventListener("abort", abort);
-      run.child = undefined;
       result.exitCode = await child.close();
     }
     result.sessionFile =
@@ -519,7 +514,6 @@ export async function runAll(
           signal,
         );
       } catch (error) {
-        run.child = undefined;
         run.result.live = undefined;
         run.result.progress.status = "failed";
         run.result.progress.error =

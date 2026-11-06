@@ -1,4 +1,3 @@
-import type { RpcChild } from "./rpc.ts";
 import type { AgentResult } from "./types.ts";
 
 const MAX_FINISHED_RUNS = 50;
@@ -7,11 +6,7 @@ export interface SubagentRun {
   readonly result: AgentResult;
   // Aborting it stops this run alone.
   readonly stop: AbortController;
-  // Set while the child can still take messages.
-  child?: RpcChild;
 }
-
-export type MessageMode = "steer" | "followUp";
 
 export function isActive(run: SubagentRun): boolean {
   const { status } = run.result.progress;
@@ -51,45 +46,7 @@ export class RunRegistry {
     for (const listener of this.listeners) listener();
   }
 
-  /** The result records the message, so the parent model learns about it. */
-  async send(run: SubagentRun, text: string, mode: MessageMode): Promise<void> {
-    const message = text.trim();
-    if (!message) return;
-    if (!run.child) throw new Error("This subagent is not running");
-    await run.child.send(
-      mode === "steer"
-        ? { type: "steer", message }
-        : { type: "follow_up", message },
-    );
-    run.result.userMessages = [...(run.result.userMessages ?? []), message];
-    this.changed();
-  }
-
   stop(run: SubagentRun): void {
     if (isActive(run)) run.stop.abort();
-  }
-
-  activeRuns(): SubagentRun[] {
-    return this.runs.filter(isActive);
-  }
-
-  /**
-   * Resolves once all runs have ended, so their sessions are complete;
-   * false on timeout.
-   */
-  stopAll(timeoutMs = 15_000): Promise<boolean> {
-    for (const run of this.activeRuns()) run.stop.abort();
-    return new Promise((resolve) => {
-      const finish = (ended: boolean) => {
-        clearTimeout(timer);
-        unsubscribe();
-        resolve(ended);
-      };
-      const timer = setTimeout(() => finish(false), timeoutMs);
-      const unsubscribe = this.subscribe(() => {
-        if (this.activeRuns().length === 0) finish(true);
-      });
-      if (this.activeRuns().length === 0) finish(true);
-    });
   }
 }

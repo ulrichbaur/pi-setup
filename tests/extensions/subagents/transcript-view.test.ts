@@ -84,6 +84,51 @@ test("a transcript shows messages and each tool call with its result", () => {
   assert.ok(plain(view.render(80)).includes("Stopped"));
 });
 
+test("historical editing and shell calls render without executing", () => {
+  const calls = [
+    {
+      name: "write",
+      arguments: { path: "/nonexistent/historical.txt", content: "saved" },
+    },
+    {
+      name: "edit",
+      arguments: {
+        path: "/nonexistent/historical.txt",
+        edits: [{ oldText: "old", newText: "new" }],
+      },
+    },
+    { name: "bash", arguments: { command: "historical-command" } },
+    { name: "safe_bash", arguments: { command: "historical-safe-command" } },
+  ];
+  const messages: TranscriptMessage[] = [
+    {
+      role: "assistant",
+      content: calls.map((call, i) => ({
+        type: "toolCall",
+        id: `old-${i}`,
+        ...call,
+      })),
+    },
+    ...calls.map((call, i) => ({
+      role: "toolResult",
+      toolCallId: `old-${i}`,
+      toolName: call.name,
+      content: [{ type: "text", text: `saved result ${i}` }],
+      isError: false,
+    })),
+  ];
+  const lines = plain(
+    renderTranscript(messages, { cwd: "/repo", invalidate: () => {} }).render(
+      100,
+    ),
+  ).join("\n");
+  assert.match(lines, /write .*historical\.txt/);
+  assert.match(lines, /edit .*historical\.txt/);
+  assert.match(lines, /\$ historical-command/);
+  assert.match(lines, /\$ historical-safe-command/);
+  assert.match(lines, /saved result 3/);
+});
+
 test("a tool call of an aborted message shows why it has no result", () => {
   const messages: TranscriptMessage[] = [
     {

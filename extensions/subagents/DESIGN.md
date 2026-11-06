@@ -11,26 +11,21 @@
   and analyst for general-purpose independent analysis.
   Analyst uses the same read-only tools as scout: `read`, `grep`, `find`, `ls`,
   and `ask_parent`.
-  Custom agents can still request editing tools and `safe_bash`.
-- Analyst replaces the built-in worker without a name alias.
-  Rename `agents.worker` in `subagents.json` to `agents.analyst`
-  unless a user agent named `worker` exists.
-  Existing configuration is not rewritten.
-- Agents come from the package, from `agents/` in Pi's agent directory,
-  and from the project's `.pi/agents/`.
-  The most specific wins by name: project over user over package.
-  The tool description marks user and project agents, and so do results.
-- Package and user agents load with the extension.
-  A malformed file fails the load with its path.
-- Project agents depend on the working directory and on project trust,
-  so they load at `session_start`, and the tool is registered again.
-  The limiter and registry are shared across registrations.
-- In an untrusted project, project agents are skipped with a notice.
-  A malformed project file skips them all with an error notice
-  that names the file.
-- `subagents.json` entries must match a package or user agent,
-  because project agents differ between projects.
-  A project agent with the name of a configured agent gets its models.
+  Researcher gets `web_search`, `web_fetch`, and `ask_parent`.
+  No subagent gets editing or shell tools.
+- The loader reads only the three named package Markdown files.
+  External user and project agent files are never discovered or read.
+  There are no overrides or agent-specific trust decisions.
+- A malformed package definition, unsupported tool, or missing tool extension
+  fails the load with the definition path.
+- Optional `subagents.json` config selects model preferences for built-ins
+  and sets concurrency, parallel task, and retention limits.
+  Missing config uses defaults silently.
+  Malformed config or an unknown agent name fails with the config path.
+- Migration: rename `agents.worker` to `agents.analyst` and remove other
+  custom-agent config entries.
+  There is no worker alias and no custom-agent support.
+  User files and saved state are not rewritten.
 
 ## Transport
 
@@ -64,21 +59,14 @@
   Every child dialog gets a cancel response, so no child waits on one.
   With a parent UI, child notifications appear there,
   prefixed with the session id.
-- `safe_bash` blocks every command that the shared bash policy catches,
-  including Git operations reserved for the parent session.
-  The error lists each blocked step with its reason and tells the subagent
-  to use a safer command or to ask the agent that gave it the task.
-- A command the work needs but `safe_bash` blocks goes through the parent.
-  The subagent asks with `ask_parent`, and the parent runs the command
-  with its own Bash after deciding whether it is appropriate.
+- Editing and shell execution belong to the parent.
+  Child tool selection permits only file inspection, web research, and questions.
 - Subagents do not ask the user questions.
   `ask_parent` ends the run with `terminate: true`, so the question
   is the run's last word, and the result tells the parent model
   to answer by continuing the session.
   A later assistant turn clears the question,
   because the run went on without the answer.
-- A model never approves its subagent's risky commands,
-  because that is a weaker check than a person.
 
 ## Transcript
 
@@ -108,16 +96,14 @@
   Extension commands run while Pi streams, so it opens during a run.
 - A run opens to its transcript, which follows new output
   until the user scrolls up.
-- A running subagent takes messages from the input line:
-  Enter steers it after its current turn,
-  and Alt+Enter queues a follow-up for when it would stop.
-  The input clears on send and gets the text back if sending fails.
-- The tool result lists the user's messages,
-  so the parent model knows why the output may differ from its request.
-- A child stops taking messages at `agent_settled`,
-  because a message sent after it would never run.
-- A finished run is read-only.
-  Continuing it belongs to the parent model through its session id.
+- Both running and finished transcripts are read-only.
+  PgUp/PgDn scroll the transcript.
+  There is no input line, steering, queued follow-up, or session switching.
+  Escape returns to the list and then closes the overlay.
+- Continuing a session belongs to the parent model through `subagent(session, task)`.
+- Historical results retain custom-agent provenance and user messages for display.
+  Historical editing and shell calls retain their transcript renderers,
+  but these tools are not registered or available to children.
 - Ctrl+X stops one run.
   The other runs of the same tool call continue,
   and the stopped one fails with "Stopped by the user".
@@ -157,30 +143,6 @@
   Results count once, matched by agent, session id, and message range.
 - The total is reported only when it changes.
 
-## Opening a session
-
-- `/agents open <id>`, or Ctrl+O in the overlay,
-  switches this Pi to a saved subagent session.
-  `/agents back` switches to the session it was opened from.
-- `/agents open` completes the saved session ids with their names,
-  newest change first.
-  The list reads only the first 8 KB of each file,
-  so a long history stays fast.
-- The opened session runs with the user's normal setup:
-  tools, skills, and extensions.
-  The agent's role prompt does not apply there.
-- A switch replaces the extension runtime, so the way back lives in
-  `subagents/returns.json` below the agent directory.
-  It maps each opened session to its parent and to the session's
-  message count at opening.
-- Opening needs an idle Pi and a saved parent session.
-- Opening closes the parent session, which stops its running subagents.
-  The user confirms first, and the switch waits until their sessions are
-  complete, so two writers never share a file.
-- When the opened session grew, going back leaves the parent model a note
-  with the newest answer and the session id.
-  The note joins the next turn and starts none.
-
 ## Sessions
 
 - Sessions live in `subagents/sessions` below Pi's agent directory.
@@ -194,7 +156,9 @@
   That is the only link between parent and child.
 - A resume finds `*_<id>.jsonl`, reads the working directory from its header,
   and starts the child there with `--session <path>`.
-  The agent's current definition and model selection apply.
+  The built-in agent's current definition and model selection apply.
+  Old worker or custom-agent sessions fail clearly because their agent is unknown.
+  Their stored results and transcripts remain readable.
 - One session runs in at most one child at a time.
   The extension tracks the ids of running sessions,
   and a request for a running session fails.

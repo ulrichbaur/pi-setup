@@ -161,31 +161,23 @@ Responses and the output the model sees have explicit size limits.
 
 `extensions/subagents/` adds the `subagent` tool with single and parallel modes.
 It provides scout, researcher, and analyst agents in isolated Pi processes.
-Add or override agents with Markdown files in `agents/` in the agent directory,
-or per project in `.pi/agents/`, which load only in trusted projects.
-The most specific file wins by name: project over yours over the package.
+Only these built-in agents load.
+User `agents/` and project `.pi/agents/` files are ignored, including overrides.
 
 The scout reads code with `read`, `grep`, `find`, and `ls`.
 The researcher uses the web tools.
 The analyst independently investigates questions and assesses proposed solutions.
 It stays read-only with the same tools as the scout.
 All three can ask the parent with `ask_parent`.
-Agent definitions cannot request the raw `bash` tool.
-
-Custom agents can request file editing tools and `safe_bash`.
-`safe_bash` uses the command policy in `lib/bash-policy.ts`.
-It blocks file deletion, local rebases, process termination, and recursive metadata changes,
-as well as `git commit`, `git pull`, and `git stash`, which belong to the parent session.
-A subagent that needs a blocked command asks the parent.
-The parent decides whether to run it with its normal Bash tool.
+Subagents have no editing or shell tools.
+Changes and commands belong to the parent.
 Subagents never ask you questions.
 An agent that needs an answer calls `ask_parent`, and its run ends with the question.
 The parent model answers by continuing the subagent's session,
 and it asks you only when it cannot answer itself.
 
-The extension depends on the web-fetch and web-search extensions
-and on the shared bash policy in `lib/`.
-If one of them is missing, the extension fails when it loads.
+The extension depends on the web-fetch and web-search extensions.
+A missing tool extension or unsupported tool fails at load with the agent file path.
 
 Each run saves its session in `subagents/sessions/` below the agent directory,
 apart from your normal sessions.
@@ -200,15 +192,11 @@ or it waits for the current turn to end.
 Background runs stop when the session closes, and their sessions stay saved.
 
 `/agents` lists this session's subagent runs, even while one runs.
-Open a running subagent to follow it, send it a message, or stop it with Ctrl+X.
-To send a message, Enter steers it and Alt+Enter queues a follow-up.
-The parent model sees the messages you sent.
+Press Enter to inspect a live or finished transcript in read-only mode.
+PgUp/PgDn scroll, Ctrl+X stops the selected run, and Escape returns to the list or closes it.
+There is no live steering or queued follow-up input.
+Continue a session through the parent model's `subagent` call instead.
 Each result and each `/agents` row shows what the run cost.
-
-To work in a subagent session yourself, run `/agents open <id>` or press Ctrl+O in `/agents`.
-The session runs with your normal tools and extensions.
-`/agents back` returns to the parent session
-and leaves the parent model a note with the subagent's newest answer.
 
 The optional config lives in `~/.pi/agent/subagents.json`,
 or below `PI_CODING_AGENT_DIR` when that variable is set.
@@ -222,10 +210,14 @@ It overrides these built-in defaults:
 Each agent may set a `models` array of `provider/model` IDs.
 The first preferred model that is available is selected.
 An agent without an available preferred model inherits the parent model and thinking level.
-A config entry for an agent without a matching package or user agent file is an error.
-The built-in worker is replaced by analyst.
-Rename `agents.worker` to `agents.analyst` unless you have a user agent named `worker`.
-There is no silent fallback to analyst, and existing config files are not changed.
+Only `scout`, `researcher`, and `analyst` may appear under `agents`.
+Malformed config and unknown agent names fail at load with the config path.
+
+Migration: rename `agents.worker` to `agents.analyst` and remove other custom-agent config entries.
+Custom agent files no longer load, and `/agents open`, `/agents back`, and Ctrl+O session switching are removed.
+No user config, agent files, or saved state are rewritten.
+Historical results and transcripts remain readable, including old editing and shell calls.
+Old worker or custom-agent sessions cannot continue because their definitions no longer exist.
 
 ```json
 {

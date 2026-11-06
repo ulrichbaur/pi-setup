@@ -24,6 +24,8 @@ import type { AgentResult } from "./types.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: definitions differ in their parameter types.
 type AnyToolDefinition = ToolDefinition<any, any, any>;
+// These definitions supply renderers only, including tools in historical sessions.
+// They are never registered or executed here.
 const TOOL_RENDERERS: Record<string, (cwd: string) => AnyToolDefinition> = {
   read: createReadToolDefinition,
   write: createWriteToolDefinition,
@@ -31,6 +33,7 @@ const TOOL_RENDERERS: Record<string, (cwd: string) => AnyToolDefinition> = {
   grep: createGrepToolDefinition,
   find: createFindToolDefinition,
   ls: createLsToolDefinition,
+  bash: createBashToolDefinition,
   safe_bash: createBashToolDefinition,
 };
 

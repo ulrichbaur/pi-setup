@@ -1,8 +1,6 @@
 import { DynamicBorder, type Theme } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
-  type Focusable,
-  Input,
   Key,
   matchesKey,
   type TUI,
@@ -10,12 +8,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { formatCost } from "../../lib/subagent-cost.ts";
 import { statusIcon } from "./render.ts";
-import {
-  isActive,
-  type MessageMode,
-  type RunRegistry,
-  type SubagentRun,
-} from "./runs.ts";
+import { isActive, type RunRegistry, type SubagentRun } from "./runs.ts";
 import { transcriptView } from "./transcript-view.ts";
 
 const OVERLAY_HEIGHT_FRACTION = 0.85;
@@ -27,36 +20,32 @@ function formatDuration(milliseconds: number): string {
     : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-export type OverlayChoice = { open: string } | undefined;
-
 export interface OverlayOptions {
   hideThinking: () => boolean;
 }
 
-export class AgentsOverlay implements Component, Focusable {
+export class AgentsOverlay implements Component {
   private view: "list" | "detail" = "list";
   private selected: SubagentRun | undefined;
   // 0 follows new output.
   private scrollFromEnd = 0;
   private viewportHeight = 1;
   private notice: { text: string; error: boolean } | undefined;
-  private readonly input = new Input({ prompt: "› " });
   private readonly border: DynamicBorder;
   private readonly separator: DynamicBorder;
   private readonly unsubscribe: () => void;
-  private isFocused = false;
 
   private readonly tui: TUI;
   private readonly theme: Theme;
   private readonly registry: RunRegistry;
-  private readonly done: (choice: OverlayChoice) => void;
+  private readonly done: () => void;
   private readonly options: OverlayOptions;
 
   constructor(
     tui: TUI,
     theme: Theme,
     registry: RunRegistry,
-    done: (choice: OverlayChoice) => void,
+    done: () => void,
     options: OverlayOptions,
   ) {
     this.tui = tui;
@@ -68,21 +57,7 @@ export class AgentsOverlay implements Component, Focusable {
     this.separator = new DynamicBorder((text: string) =>
       theme.fg("borderMuted", text),
     );
-    this.input.onSubmit = (value) => this.send(value, "steer");
     this.unsubscribe = registry.subscribe(() => tui.requestRender());
-  }
-
-  get focused(): boolean {
-    return this.isFocused;
-  }
-
-  set focused(value: boolean) {
-    this.isFocused = value;
-    this.updateFocus();
-  }
-
-  private updateFocus(): void {
-    this.input.focused = this.isFocused && this.view === "detail";
   }
 
   handleInput(data: string): void {
@@ -103,18 +78,11 @@ export class AgentsOverlay implements Component, Focusable {
     return lines.map((line) => truncateToWidth(line, width, ""));
   }
 
-  invalidate(): void {
-    this.input.invalidate();
-  }
+  invalidate(): void {}
 
-  private close(choice?: OverlayChoice): void {
+  private close(): void {
     this.unsubscribe();
-    this.done(choice);
-  }
-
-  // Only the command context can switch sessions.
-  private openSession(run: SubagentRun): void {
-    if (run.result.sessionId) this.close({ open: run.result.sessionId });
+    this.done();
   }
 
   private runs(): SubagentRun[] {
@@ -142,8 +110,6 @@ export class AgentsOverlay implements Component, Focusable {
       this.open(this.selected);
     } else if (matchesKey(data, Key.ctrl("x")) && this.selected) {
       this.stop(this.selected);
-    } else if (matchesKey(data, Key.ctrl("o")) && this.selected) {
-      this.openSession(this.selected);
     }
   }
 
@@ -163,18 +129,11 @@ export class AgentsOverlay implements Component, Focusable {
     if (!run) return;
     if (matchesKey(data, Key.escape)) {
       this.view = "list";
-      this.updateFocus();
       this.notice = undefined;
     } else if (matchesKey(data, Key.ctrl("x"))) {
       this.stop(run);
-    } else if (matchesKey(data, Key.ctrl("o"))) {
-      this.openSession(run);
     } else if (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)) {
       this.scroll(data);
-    } else if (matchesKey(data, Key.alt("enter"))) {
-      this.send(this.input.getValue(), "followUp");
-    } else if (isActive(run)) {
-      this.input.handleInput(data);
     }
   }
 
@@ -183,41 +142,12 @@ export class AgentsOverlay implements Component, Focusable {
     this.view = "detail";
     this.scrollFromEnd = 0;
     this.notice = undefined;
-    this.input.setValue("");
-    this.updateFocus();
   }
 
   private stop(run: SubagentRun): void {
     if (!isActive(run)) return;
     this.registry.stop(run);
     this.notice = { text: "Stopping this subagent…", error: false };
-  }
-
-  private send(value: string, mode: MessageMode): void {
-    const run = this.selected;
-    if (!run || !value.trim()) return;
-    // Clear at once, so text typed while the child answers is kept apart.
-    this.input.setValue("");
-    this.registry.send(run, value, mode).then(
-      () => {
-        this.notice = {
-          text:
-            mode === "steer"
-              ? "Sent. The subagent reads it after its current turn."
-              : "Queued. The subagent reads it when it would stop.",
-          error: false,
-        };
-        this.tui.requestRender();
-      },
-      (error: unknown) => {
-        if (!this.input.getValue()) this.input.setValue(value);
-        this.notice = {
-          text: error instanceof Error ? error.message : String(error),
-          error: true,
-        };
-        this.tui.requestRender();
-      },
-    );
   }
 
   private summary(run: SubagentRun): string {
@@ -285,10 +215,7 @@ export class AgentsOverlay implements Component, Focusable {
             ];
           });
     const footer = [
-      this.theme.fg(
-        "dim",
-        " ↑↓ select · Enter view · Ctrl+O open session · Ctrl+X stop · Esc close",
-      ),
+      this.theme.fg("dim", " ↑↓ select · Enter view · Ctrl+X stop · Esc close"),
     ];
     const selected = this.selected ? runs.indexOf(this.selected) : 0;
     const height = this.measureViewport(width, maxHeight, header, footer);
@@ -350,7 +277,6 @@ export class AgentsOverlay implements Component, Focusable {
       );
     }
 
-    this.updateFocus();
     const footer: string[] = [];
     if (this.notice) {
       footer.push(
@@ -361,18 +287,17 @@ export class AgentsOverlay implements Component, Focusable {
       );
     }
     if (isActive(run)) {
-      footer.push(...this.input.render(width));
       footer.push(
         this.theme.fg(
           "dim",
-          " Enter steer · Alt+Enter follow-up · PgUp/PgDn · Ctrl+O open session · Ctrl+X stop · Esc back",
+          " Read-only · PgUp/PgDn scroll · Ctrl+X stop · Esc back",
         ),
       );
     } else {
       footer.push(
         this.theme.fg(
           "dim",
-          " Finished: read-only · PgUp/PgDn scroll · Ctrl+O open session · Esc back",
+          " Finished: read-only · PgUp/PgDn scroll · Esc back",
         ),
       );
     }

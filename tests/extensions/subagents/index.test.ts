@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -46,11 +52,16 @@ const theme = {
 
 type Sent = { message: Record<string, unknown>; options: unknown };
 type Handler = (event?: unknown, ctx?: unknown) => void;
+type Command = {
+  handler: (args: string, ctx: unknown) => Promise<void>;
+  getArgumentCompletions?: unknown;
+};
 
 function load() {
   const sent: Sent[] = [];
   const costs: unknown[] = [];
   const handlers: Record<string, Handler> = {};
+  const commands: Record<string, Command> = {};
   let tool: {
     description: string;
     execute: (...args: unknown[]) => Promise<{
@@ -66,7 +77,9 @@ function load() {
     registerTool: (definition: typeof tool) => {
       tool = definition;
     },
-    registerCommand: () => {},
+    registerCommand: (name: string, command: Command) => {
+      commands[name] = command;
+    },
     registerMessageRenderer: () => {},
     events: {
       emit: (channel: string, data: unknown) => costs.push([channel, data]),
@@ -102,11 +115,34 @@ function load() {
     sent,
     arrived,
     handlers,
+    commands,
     registry,
     costs,
     description: () => tool.description,
   };
 }
+
+test("malformed own config fails at load with its path and stays unchanged", () => {
+  const path = join(agentDir, "subagents.json");
+  const malformed = "{ broken JSON";
+  writeFileSync(path, malformed);
+  try {
+    assert.throws(() => load(), { message: `${path}: invalid JSON` });
+    assert.equal(readFileSync(path, "utf8"), malformed);
+  } finally {
+    writeFileSync(path, JSON.stringify({ maxConcurrency: 1 }));
+  }
+});
+
+test("/agents rejects removed navigation actions and has no completions", async () => {
+  const { commands } = load();
+  const notices: string[] = [];
+  const ctx = { ui: { notify: (message: string) => notices.push(message) } };
+  assert.equal(commands.agents.getArgumentCompletions, undefined);
+  await commands.agents.handler("open scout-12345678", ctx);
+  await commands.agents.handler("back", ctx);
+  assert.deepEqual(notices, ["Usage: /agents", "Usage: /agents"]);
+});
 
 test("a background run returns at once and delivers its result later", async () => {
   const { run, sent, arrived } = load();
@@ -158,7 +194,9 @@ test("results of a shut-down session are never delivered", async () => {
   const { run, sent, handlers, registry } = load();
   await run({ agent: "scout", task: "look around", background: true });
   handlers.session_shutdown();
-  assert.equal(await registry.stopAll(), true);
+  await until(() =>
+    registry.list().every((run) => run.result.progress.status === "failed"),
+  );
   // Delivery follows in the same promise chain, before the next macrotask.
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sent.length, 0);
@@ -174,7 +212,7 @@ test("background and foreground runs share one concurrency limit", async () => {
   try {
     await run({ agent: "scout", task: "first", background: true });
     const first = registry.list()[0];
-    await until(() => first.child !== undefined);
+    await until(() => first.result.live !== undefined);
 
     const statuses: string[] = [];
     registry.subscribe(() => {
@@ -191,7 +229,7 @@ test("background and foreground runs share one concurrency limit", async () => {
     assert.equal(second.result.progress.status, "pending");
 
     registry.stop(first);
-    await until(() => second.child !== undefined);
+    await until(() => second.result.live !== undefined);
     registry.stop(second);
     await foreground;
     const firstRunning = statuses.find((pair) => pair.endsWith("/running"));
@@ -199,7 +237,16 @@ test("background and foreground runs share one concurrency limit", async () => {
     assert.equal(second.result.progress.error, "Stopped by the user");
   } finally {
     // A failed assertion must not leave hanging children behind.
-    await registry.stopAll();
+    for (const run of registry.list()) registry.stop(run);
+    await until(() =>
+      registry
+        .list()
+        .every(
+          (run) =>
+            run.result.progress.status !== "running" &&
+            run.result.progress.status !== "pending",
+        ),
+    );
     delete process.env.FAKE_PI_MODE;
   }
 });
@@ -316,13 +363,13 @@ test("the subagent cost total covers saved and running runs", () => {
   near(lastCost(), 0.026);
 });
 
-test("worker config requires a user agent and never falls back to analyst", () => {
+test("worker config fails even when a user agent file exists", () => {
   const config = parseSubagentConfig({
     agents: { worker: { models: ["provider/model"] } },
   });
   assert.throws(
     () => loadAgents(config),
-    /agents\.worker has no matching agent file/,
+    /agents\.worker is not a built-in agent/,
   );
   const workerFile = join(agentDir, "agents", "worker.md");
   try {
@@ -330,21 +377,16 @@ test("worker config requires a user agent and never falls back to analyst", () =
       workerFile,
       "---\nname: worker\ndescription: custom worker\ntools: read, safe_bash\n---\nWork.",
     );
-    const agents = loadAgents(config);
-    assert.deepEqual(
-      agents.find((agent) => agent.name === "worker")?.modelPreferences,
-      ["provider/model"],
-    );
-    assert.deepEqual(
-      agents.find((agent) => agent.name === "analyst")?.modelPreferences,
-      [],
+    assert.throws(
+      () => loadAgents(config),
+      /agents\.worker is not a built-in agent/,
     );
   } finally {
     rmSync(workerFile);
   }
 });
 
-test("project agents load in trusted projects and override by name", () => {
+test("external agent files never load, override, or require trust", () => {
   const project = mkdtempSync(join(tmpdir(), "subagent-project-"));
   try {
     mkdirSync(join(project, ".pi", "agents"), { recursive: true });
@@ -368,12 +410,13 @@ test("project agents load in trusted projects and override by name", () => {
     };
 
     const untrusted = start(false);
-    assert.match(untrusted.description, /reviewer \[user\] \(reviews diffs\)/);
+    assert.doesNotMatch(untrusted.description, /reviewer/);
     assert.doesNotMatch(untrusted.description, /knows this repo/);
-    assert.match(untrusted.notices.join("\n"), /not trusted/);
+    assert.deepEqual(untrusted.notices, []);
 
     const trusted = start(true);
-    assert.match(trusted.description, /scout \[project\] \(knows this repo\)/);
+    assert.match(trusted.description, /scout \(/);
+    assert.doesNotMatch(trusted.description, /knows this repo|reviewer/);
     assert.match(trusted.description, /analyst \(/);
     assert.match(trusted.description, /researcher \(/);
     assert.doesNotMatch(trusted.description, /worker \(/);
@@ -381,10 +424,7 @@ test("project agents load in trusted projects and override by name", () => {
 
     writeFileSync(join(project, ".pi", "agents", "bad.md"), "no frontmatter");
     const broken = start(true);
-    assert.match(
-      broken.notices.join("\n"),
-      /Project agents were not loaded: .*bad\.md/,
-    );
+    assert.deepEqual(broken.notices, []);
     assert.doesNotMatch(broken.description, /knows this repo/);
   } finally {
     rmSync(project, { recursive: true, force: true });

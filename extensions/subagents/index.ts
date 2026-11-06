@@ -1,32 +1,23 @@
-import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import {
   SUBAGENT_COST_CHANNEL,
   type SubagentCostEvent,
 } from "../../lib/subagent-cost.ts";
-import {
-  loadAgents,
-  mergeAgents,
-  projectAgentsDir,
-  readAgentDir,
-} from "./agents.ts";
-import { AgentsOverlay, type OverlayChoice } from "./agents-view.ts";
+import { loadAgents } from "./agents.ts";
+import { AgentsOverlay } from "./agents-view.ts";
 import { loadConfig } from "./config.ts";
 import { Limiter } from "./limiter.ts";
-import { openSubagentSession, returnToParent } from "./navigation.ts";
 import { combinedText, renderDetails } from "./render.ts";
 import { resultKey, savedRuns } from "./restore.ts";
 import { RunRegistry } from "./runs.ts";
-import { listSavedSessions, pruneSessions } from "./sessions.ts";
+import { pruneSessions } from "./sessions.ts";
 import { extensionTool, type ToolServices } from "./tool.ts";
 import {
   type Delivery,
   RESULT_MESSAGE_TYPE,
   type SubagentDetails,
 } from "./types.ts";
-
-const SAVED_SESSION_LIMIT = 200;
 
 export default function subagents(
   pi: ExtensionAPI,
@@ -66,29 +57,6 @@ export default function subagents(
   };
   pi.registerTool(extensionTool(config, agents, services));
 
-  // Project agents depend on the working directory and on project trust,
-  // which only a session knows.
-  pi.on("session_start", (_event, ctx) => {
-    const directory = projectAgentsDir(ctx.cwd);
-    if (!existsSync(directory)) return;
-    if (!ctx.isProjectTrusted()) {
-      ctx.ui.notify(
-        `${directory}: project agents were not loaded because this project is not trusted`,
-        "warning",
-      );
-      return;
-    }
-    try {
-      const project = readAgentDir(directory, "project", config);
-      if (project.length === 0) return;
-      pi.registerTool(
-        extensionTool(config, mergeAgents(agents, project), services),
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Project agents were not loaded: ${message}`, "error");
-    }
-  });
   pi.registerMessageRenderer<SubagentDetails>(
     RESULT_MESSAGE_TYPE,
     (message, options, theme) => {
@@ -118,54 +86,17 @@ export default function subagents(
   });
 
   pi.registerCommand("agents", {
-    description:
-      "Follow subagents; `open <id>` switches to a subagent session, `back` returns",
-    getArgumentCompletions: (prefix) => {
-      if (prefix.startsWith("open ")) {
-        const typed = prefix.slice("open ".length);
-        return listSavedSessions(SAVED_SESSION_LIMIT)
-          .filter((session) => session.id.startsWith(typed))
-          .map((session) => ({
-            value: `open ${session.id}`,
-            label: session.id,
-            description: session.name,
-          }));
-      }
-      return [
-        {
-          value: "open ",
-          label: "open",
-          description: "Open a subagent session",
-        },
-        {
-          value: "back",
-          label: "back",
-          description: "Return to the parent session",
-        },
-      ].filter((item) => item.value.startsWith(prefix));
-    },
+    description: "List subagents, inspect live transcripts, or stop a run",
     handler: async (args, ctx) => {
-      const [action, id, ...rest] = args.trim().split(/\s+/).filter(Boolean);
-      if (action === "open" && id && rest.length === 0) {
-        await openSubagentSession(ctx, registry, id);
-        return;
-      }
-      if (action === "back" && !id) {
-        await returnToParent(ctx);
-        return;
-      }
-      if (action) {
-        ctx.ui.notify(
-          "Usage: /agents, /agents open <id>, or /agents back",
-          "warning",
-        );
+      if (args.trim()) {
+        ctx.ui.notify("Usage: /agents", "warning");
         return;
       }
       if (ctx.mode !== "tui") {
         ctx.ui.notify("The agents overlay requires TUI mode", "warning");
         return;
       }
-      const choice = await ctx.ui.custom<OverlayChoice>(
+      await ctx.ui.custom<void>(
         (tui, theme, _keybindings, done) =>
           new AgentsOverlay(tui, theme, registry, done, { hideThinking }),
         {
@@ -178,7 +109,6 @@ export default function subagents(
           },
         },
       );
-      if (choice) await openSubagentSession(ctx, registry, choice.open);
     },
   });
 

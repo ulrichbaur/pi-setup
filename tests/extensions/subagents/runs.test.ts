@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { RpcChild } from "../../../extensions/subagents/rpc.ts";
 import { RunRegistry } from "../../../extensions/subagents/runs.ts";
 import { fakeRun } from "./fake-run.ts";
 
@@ -31,29 +30,6 @@ test("only the newest finished runs stay in the list", () => {
   assert.equal(runs.length, 51);
   assert.ok(runs.includes(live));
   assert.equal(runs[0].result.sessionId, "scout-00000054");
-});
-
-test("messages reach a running child and are recorded for the parent", async () => {
-  const registry = new RunRegistry();
-  const run = fakeRun("worker-00000001");
-  const sent: unknown[] = [];
-  run.child = {
-    send: async (command: unknown) => {
-      sent.push(command);
-    },
-  } as unknown as RpcChild;
-
-  await registry.send(run, "  use pnpm  ", "steer");
-  await registry.send(run, "then summarize", "followUp");
-  await registry.send(run, "   ", "steer");
-  assert.deepEqual(sent, [
-    { type: "steer", message: "use pnpm" },
-    { type: "follow_up", message: "then summarize" },
-  ]);
-  assert.deepEqual(run.result.userMessages, ["use pnpm", "then summarize"]);
-
-  run.child = undefined;
-  await assert.rejects(registry.send(run, "hello", "steer"), /not running/);
 });
 
 test("stop aborts one active run and ignores finished ones", () => {

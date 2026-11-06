@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -23,8 +17,7 @@ const PI_CLI = join(
 );
 const hasTmux = spawnSync("tmux", ["-V"]).status === 0;
 
-// The parent sees a SCENARIO prompt; the test agent's system prompt carries
-// ROLE: tester, and its task names what to do.
+// The parent sees SCENARIO prompts; the child uses the built-in scout role.
 const script: Script = (messages) => {
   const system = text(messages.find((m) => m.role === "system")?.content);
   const users = messages
@@ -33,25 +26,16 @@ const script: Script = (messages) => {
   const last = messages.at(-1);
   const lastText = text(last?.content);
 
-  if (system.includes("ROLE: tester")) {
+  if (system.includes("You are a scout")) {
     const task = users[0] ?? "";
+    if (task.includes("TASK wait")) return { tool: "ls", args: { path: "." } };
     if (task.includes("TASK ask")) {
       // A resumed session ends with the parent's answer.
       return users.slice(1).some((user) => user.includes("blue"))
-        ? { text: "Tester chose blue" }
+        ? { text: "Scout chose blue" }
         : { tool: "ask_parent", args: { question: "Which color?" } };
     }
-    if (task.includes("TASK delete")) {
-      if (last?.role !== "tool") {
-        return { tool: "safe_bash", args: { command: "rm notes.txt" } };
-      }
-      return {
-        text: lastText.includes("blocked")
-          ? "Tester was blocked"
-          : "Tester deleted the file",
-      };
-    }
-    if (last?.role === "tool") return { text: "Tester found the files" };
+    if (last?.role === "tool") return { text: "Scout found the files" };
     return { tool: "ls", args: { path: "." } };
   }
 
@@ -62,27 +46,35 @@ const script: Script = (messages) => {
     .reverse()
     .find((user) => user.includes("SCENARIO"));
   if (last?.role === "tool") {
-    const asked = /The subagent asks: .*\n.*session (tester-[0-9a-f]{8})/.exec(
+    const asked = /The subagent asks: .*\n.*session (scout-[0-9a-f]{8})/.exec(
       lastText,
     );
     if (asked) {
       return { tool: "subagent", args: { session: asked[1], task: "blue" } };
     }
-    if (scenario?.includes("block")) return { text: "Parent waits" };
+    if (scenario?.includes("live"))
+      return { text: "Parent waits for live run" };
+    if (scenario?.includes("background")) return { text: "Parent waits" };
     return {
       text: scenario?.includes("ask") ? "Parent done asking" : "Parent done",
     };
   }
   if (scenario?.includes("foreground")) {
-    return { tool: "subagent", args: { agent: "tester", task: "TASK list" } };
+    return { tool: "subagent", args: { agent: "scout", task: "TASK list" } };
   }
   if (scenario?.includes("ask")) {
-    return { tool: "subagent", args: { agent: "tester", task: "TASK ask" } };
+    return { tool: "subagent", args: { agent: "scout", task: "TASK ask" } };
   }
-  if (scenario?.includes("block")) {
+  if (scenario?.includes("live")) {
     return {
       tool: "subagent",
-      args: { agent: "tester", task: "TASK delete", background: true },
+      args: { agent: "scout", task: "TASK wait", background: true },
+    };
+  }
+  if (scenario?.includes("background")) {
+    return {
+      tool: "subagent",
+      args: { agent: "scout", task: "TASK list", background: true },
     };
   }
   return { text: "Nothing to do" };
@@ -116,7 +108,7 @@ before(async () => {
   socket = join(root, "tmux.sock");
   const agentDir = join(root, "agent");
   const project = join(root, "project");
-  mkdirSync(join(agentDir, "agents"), { recursive: true });
+  mkdirSync(agentDir, { recursive: true });
   mkdirSync(project);
   writeFileSync(join(project, "notes.txt"), "a file to list\n");
 
@@ -148,10 +140,6 @@ before(async () => {
       defaultModel: "fake-model",
       quietStartup: true,
     }),
-  );
-  writeFileSync(
-    join(agentDir, "agents", "tester.md"),
-    "---\nname: tester\ndescription: scripted test agent\ntools: ls, ask_parent, safe_bash\n---\nROLE: tester\n",
   );
   const config = join(root, "tmux.conf");
   writeFileSync(
@@ -206,15 +194,15 @@ test("a foreground run shows its result, transcript, and cost", {
   type("SCENARIO foreground");
   press("Enter");
   const done = await waitFor(/Parent done/);
-  assert.match(done, /✓ tester/);
-  assert.match(done, /Tester found the files/);
+  assert.match(done, /✓ scout/);
+  assert.match(done, /Scout found the files/);
   assert.match(done, /sub \$0\.\d+/);
 
   press("C-o");
-  const expanded = await waitFor(/Work in it yourself: \/agents open tester-/);
+  const expanded = await waitFor(/Session: .*scout-/);
   assert.match(expanded, /Task: TASK list/);
   press("C-o");
-  await waitFor(/^(?![\s\S]*Work in it yourself)/);
+  await waitFor(/^(?![\s\S]*Session: )/);
 });
 
 test("a subagent asks the parent, which resumes it with the answer", {
@@ -224,24 +212,60 @@ test("a subagent asks the parent, which resumes it with the answer", {
   press("Enter");
   const done = await waitFor(/Parent done asking/);
   assert.match(done, /\? Asks the parent: Which color\?/);
-  assert.match(done, /continues tester-/);
-  assert.match(done, /Tester chose blue/);
+  assert.match(done, /continues scout-/);
+  assert.match(done, /Scout chose blue/);
   assert.doesNotMatch(done, /waiting for your answer/);
 });
 
-test("a background run's risky command is blocked", { skip }, async () => {
-  type("SCENARIO block");
+test("a background run delivers and its transcript opens read-only", {
+  skip,
+}, async () => {
+  type("SCENARIO background");
   press("Enter");
   await waitFor(/Parent waits/);
   await waitFor(/Background subagent finished/);
   const final = await waitFor(/Parent got the result/);
-  assert.match(final, /Tester was blocked/);
-  assert.equal(existsSync(join(root, "project", "notes.txt")), true);
+  assert.match(final, /Scout found the files/);
 
   type("/agents");
   press("Enter");
   const list = await waitFor(/Subagents \(4\)/);
-  assert.match(list, /tester-\w+ · completed/);
+  assert.match(list, /scout-\w+ · completed/);
+  assert.doesNotMatch(list, /open session/);
+  press("Enter");
+  const detail = await waitFor(/Finished: read-only/);
+  assert.match(detail, /Scout found the files/);
+  assert.doesNotMatch(detail, /steer|follow-up|open session/);
+  type("ignored input");
+  press("C-o");
+  assert.match(screen(), /Finished: read-only/);
+  assert.doesNotMatch(screen(), /ignored input/);
+  press("Escape");
+  await waitFor(/Subagents \(4\)/);
   press("Escape");
   await waitFor(/^(?![\s\S]*Subagents \(4\))/);
+});
+
+test("a live transcript stays read-only and the selected run can be cancelled", {
+  skip,
+}, async () => {
+  type("SCENARIO live");
+  press("Enter");
+  await waitFor(/Parent waits for live run/);
+  type("/agents");
+  press("Enter");
+  await waitFor(/Subagents \(5\)/);
+  press("Enter");
+  const live = await waitFor(/Read-only · PgUp\/PgDn scroll · Ctrl\+X stop/);
+  assert.match(live, /ls/);
+  assert.doesNotMatch(live, /steer|follow-up|open session/);
+  press("PPage");
+  press("NPage");
+  press("C-x");
+  await waitFor(/Finished: read-only/);
+  assert.match(screen(), /Stopped by the user/);
+  press("Escape");
+  await waitFor(/Subagents \(5\)/);
+  press("Escape");
+  await waitFor(/Parent got the result/);
 });

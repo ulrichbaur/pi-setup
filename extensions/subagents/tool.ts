@@ -36,22 +36,13 @@ const TaskSchema = Type.Object({
   session: Type.Optional(Type.String({ description: SESSION_DESCRIPTION })),
 });
 
-/**
- * State every registration of the tool shares. The tool is registered again
- * when project agents load, and runs must keep one limit and one queue.
- */
+/** State shared by all foreground and background calls. */
 export interface ToolServices {
   registry: RunRegistry;
   delivery: Delivery;
   hideThinking: () => boolean;
   // One limit for every run of this session, background runs included.
   limiter: Limiter;
-}
-
-function agentLabel(agent: AgentDefinition): string {
-  return agent.source === "package"
-    ? agent.name
-    : `${agent.name} [${agent.source}]`;
 }
 
 export function extensionTool(
@@ -63,7 +54,7 @@ export function extensionTool(
   return {
     name: "subagent" as const,
     label: "Subagent",
-    description: `Run an isolated subagent. Available agents: ${agents.map((agent) => `${agentLabel(agent)} (${agent.description})`).join(", ")}.`,
+    description: `Run an isolated subagent. Available agents: ${agents.map((agent) => `${agent.name} (${agent.description})`).join(", ")}.`,
     promptSnippet:
       "Delegate reasoning or autonomous work to an isolated subagent",
     promptGuidelines: [
@@ -174,12 +165,7 @@ export function extensionTool(
           .map((model) => `${model.provider}/${model.id}`),
       );
       const runs: SubagentRun[] = plans.map((plan) => ({
-        result: {
-          ...pendingResult(plan.agent.name, plan.task, plan.target.id),
-          ...(plan.agent.source === "package"
-            ? {}
-            : { agentSource: plan.agent.source }),
-        },
+        result: pendingResult(plan.agent.name, plan.task, plan.target.id),
         stop: new AbortController(),
       }));
       const update = () => {

@@ -142,16 +142,6 @@ function addFooter(
     container.addChild(
       new Text(theme.fg("dim", `Session: ${result.sessionFile}`), 0, 0),
     );
-    container.addChild(
-      new Text(
-        theme.fg(
-          "dim",
-          `Work in it yourself: /agents open ${result.sessionId}`,
-        ),
-        0,
-        0,
-      ),
-    );
   }
 }
 

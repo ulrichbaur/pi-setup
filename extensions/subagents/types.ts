@@ -1,14 +1,11 @@
 import type { LiveTranscript } from "./transcript.ts";
 
-export type AgentSource = "package" | "user" | "project";
-
 export interface AgentDefinition {
   name: string;
   description: string;
   tools: string[];
   modelPreferences: string[];
   systemPrompt: string;
-  source: AgentSource;
 }
 
 export interface ToolEvent {
@@ -56,10 +53,11 @@ export interface AgentResult {
   messageEnd?: number;
   // Present only while the run streams; the saved result reads the file.
   live?: LiveTranscript;
+  // Historical results may include messages sent through the former live UI.
   userMessages?: string[];
   // The question the subagent asked its parent when its run ended.
   question?: string;
-  // Where a user or project agent came from; absent for package agents.
+  // Historical custom-agent provenance, retained for display only.
   agentSource?: "user" | "project";
 }
 
