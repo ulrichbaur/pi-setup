@@ -1,7 +1,7 @@
 /**
- * `/files` and ctrl+shift+o: one fuzzy-searchable list over the Git tree
- * and the files mentioned or changed in the session. Selecting a file adds
- * an `@path` mention to the prompt or copies the path.
+ * `/files` and alt+o: one fuzzy-searchable list over the Git tree
+ * and the files mentioned or changed in the session. Confirming a selection
+ * appends the selected files as `@path` mentions to the existing prompt.
  */
 
 import path from "node:path";
@@ -10,19 +10,7 @@ import type {
   ExtensionContext,
   SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import {
-  copyToClipboard,
-  DynamicBorder,
-} from "@earendil-works/pi-coding-agent";
-import {
-  Container,
-  fuzzyFilter,
-  Input,
-  type SelectItem,
-  SelectList,
-  Spacer,
-  Text,
-} from "@earendil-works/pi-tui";
+import { showFilePicker } from "./picker.ts";
 import {
   collectSessionFileChanges,
   extractFileReferencesFromEntry,
@@ -245,130 +233,18 @@ const buildFileEntries = async (
 // Actions
 // ---------------------------------------------------------------------------
 
-const addFileToPrompt = (ctx: ExtensionContext, target: FileEntry): void => {
-  const mention = `@${target.displayPath}`;
-  const current = ctx.ui.getEditorText();
-  const separator = current && !current.endsWith(" ") ? " " : "";
-  ctx.ui.setEditorText(`${current}${separator}${mention}`);
-  ctx.ui.notify(`Added ${mention} to prompt`, "info");
-};
-
-const copyPathToClipboard = (
+const addFilesToPrompt = (
   ctx: ExtensionContext,
-  target: FileEntry,
+  selected: readonly { displayPath: string }[],
 ): void => {
-  copyToClipboard(target.canonicalPath);
-  ctx.ui.notify(`Copied ${target.displayPath} to clipboard`, "info");
-};
-
-// ---------------------------------------------------------------------------
-// File selector TUI
-// ---------------------------------------------------------------------------
-
-const showFileSelector = async (
-  ctx: ExtensionContext,
-  files: FileEntry[],
-  selectedPath?: string | null,
-): Promise<string | null> => {
-  const items: SelectItem[] = files.map((file) => {
-    const directoryLabel = file.isDirectory ? " [directory]" : "";
-    const statusSuffix = file.status ? ` [${file.status}]` : "";
-    return {
-      value: file.canonicalPath,
-      label: `${file.displayPath}${directoryLabel}${statusSuffix}`,
-    };
-  });
-  const selection = await ctx.ui.custom<string | null>(
-    (tui, theme, keybindings, done) => {
-      const container = new Container();
-      container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
-      container.addChild(
-        new Text(theme.fg("accent", theme.bold(" Select file")), 0, 0),
-      );
-      const searchInput = new Input();
-      container.addChild(searchInput);
-      container.addChild(new Spacer(1));
-      const listContainer = new Container();
-      container.addChild(listContainer);
-      container.addChild(
-        new Text(
-          theme.fg("dim", "Type to filter • enter to select • esc to cancel"),
-          0,
-          0,
-        ),
-      );
-      container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
-      let filteredItems = items;
-      let selectList: SelectList | null = null;
-      const updateList = () => {
-        listContainer.clear();
-        if (filteredItems.length === 0) {
-          listContainer.addChild(
-            new Text(theme.fg("warning", "  No matching files"), 0, 0),
-          );
-          selectList = null;
-          return;
-        }
-        selectList = new SelectList(
-          filteredItems,
-          Math.min(filteredItems.length, 12),
-          {
-            selectedPrefix: (text) => theme.fg("accent", text),
-            selectedText: (text) => theme.fg("accent", text),
-            description: (text) => theme.fg("muted", text),
-            scrollInfo: (text) => theme.fg("dim", text),
-            noMatch: (text) => theme.fg("warning", text),
-          },
-        );
-        if (selectedPath) {
-          const index = filteredItems.findIndex(
-            (item) => item.value === selectedPath,
-          );
-          if (index >= 0) selectList.setSelectedIndex(index);
-        }
-        selectList.onSelect = (item) => done(item.value as string);
-        selectList.onCancel = () => done(null);
-        listContainer.addChild(selectList);
-      };
-      const applyFilter = () => {
-        const query = searchInput.getValue();
-        filteredItems = query
-          ? fuzzyFilter(
-              items,
-              query,
-              (item) => `${item.label} ${item.value} ${item.description ?? ""}`,
-            )
-          : items;
-        updateList();
-      };
-      applyFilter();
-      return {
-        render(width: number) {
-          return container.render(width);
-        },
-        invalidate() {
-          container.invalidate();
-        },
-        handleInput(data: string) {
-          if (
-            keybindings.matches(data, "tui.select.up") ||
-            keybindings.matches(data, "tui.select.down") ||
-            keybindings.matches(data, "tui.select.confirm") ||
-            keybindings.matches(data, "tui.select.cancel")
-          ) {
-            if (selectList) selectList.handleInput(data);
-            else if (keybindings.matches(data, "tui.select.cancel")) done(null);
-            tui.requestRender();
-            return;
-          }
-          searchInput.handleInput(data);
-          applyFilter();
-          tui.requestRender();
-        },
-      };
-    },
+  const mentions = selected.map((file) => `@${file.displayPath}`).join(" ");
+  const current = ctx.ui.getEditorText();
+  const separator = current && !/\s$/.test(current) ? " " : "";
+  ctx.ui.setEditorText(`${current}${separator}${mentions}`);
+  ctx.ui.notify(
+    `Added ${selected.length} file mention${selected.length === 1 ? "" : "s"} to prompt`,
+    "info",
   );
-  return selection;
 };
 
 // ---------------------------------------------------------------------------
@@ -384,34 +260,14 @@ const runFileBrowser = async (
     return;
   }
 
-  let lastSelectedPath: string | null = null;
-  while (true) {
-    const { files } = await buildFileEntries(pi, ctx);
-    if (files.length === 0) {
-      ctx.ui.notify("No files found", "info");
-      return;
-    }
-
-    const selection = await showFileSelector(ctx, files, lastSelectedPath);
-    if (!selection) return;
-
-    const selected = files.find((file) => file.canonicalPath === selection);
-    if (!selected) continue;
-    lastSelectedPath = selected.canonicalPath;
-
-    const actions = ["Add to prompt", "Copy path"];
-    const action = await ctx.ui.select(
-      `Actions for ${selected.displayPath}`,
-      actions,
-    );
-    if (!action) continue;
-
-    if (action === "Add to prompt") {
-      addFileToPrompt(ctx, selected);
-    } else if (action === "Copy path") {
-      copyPathToClipboard(ctx, selected);
-    }
+  const { files } = await buildFileEntries(pi, ctx);
+  if (files.length === 0) {
+    ctx.ui.notify("No files found", "info");
+    return;
   }
+
+  const selected = await showFilePicker(ctx, files);
+  if (selected?.length) addFilesToPrompt(ctx, selected);
 };
 
 // ---------------------------------------------------------------------------
@@ -426,7 +282,7 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerShortcut("ctrl+shift+o", {
+  pi.registerShortcut("alt+o", {
     description: "Browse files mentioned or changed in the session",
     handler: async (ctx) => {
       await runFileBrowser(pi, ctx);

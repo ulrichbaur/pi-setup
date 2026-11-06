@@ -115,12 +115,22 @@ Run `/reload` after you change either file by hand.
 
 ### Files
 
-`extensions/files/` provides `/files`, also bound to `ctrl+shift+o`.
+`extensions/files/` provides `/files`, also bound to `alt+o`.
 It is a fuzzy-searchable browser over the current Git tree:
 tracked and untracked files with their Git status,
 plus files referenced or edited in the session.
 Dirty files sort first, then files changed in this session, newest first.
-For a selected file, you can add an `@path` mention to the prompt or copy the path to the clipboard.
+
+Each opening starts with no files selected.
+Use arrows to navigate, Tab to toggle checkboxes, and type to filter.
+Space stays part of the search query.
+The header shows the selected count, including files hidden by the current filter.
+
+Enter appends all selected files as `@path` mentions to the existing draft and closes the picker.
+With nothing selected, Enter adds the highlighted file directly.
+Esc cancels without changing the draft.
+Selection lasts only for that opening and does not read or update existing mentions.
+Delete mentions manually in the editor when you no longer need them.
 
 A renamed file keeps its destination path.
 A tracked symlink keeps its own path, not the path of its target.
