@@ -136,31 +136,6 @@ It requires TUI mode.
 `/send-diff` and `/sd` send changes made to the file outside Pi as a user message.
 Final assistant replies are appended to the linked file.
 
-### Bash guard
-
-`extensions/bash-guard/` reviews flagged Bash commands before they run.
-It flags destructive or hard-to-recover operations,
-such as `rm`, `sudo`, `git reset --hard`, `git rebase`, and `git push`.
-It does not flag what the edit tools already allow, such as file redirects or `sed -i`.
-It also does not flag Git operations that the index or reflog can undo,
-such as `git add`, `git commit`, branch switches, `git merge`, and `git pull`.
-Commands reached through `xargs`, `find -exec`, `eval`, or wrappers like `nohup`
-are judged like direct ones.
-
-Every prompt and block message lists each risky step with the reason it was flagged.
-A multi-line or otherwise complex command with a risky step is blocked
-instead of shown, and the model is asked to run that step on its own.
-In an interactive session, you approve or abort each flagged command,
-and you may give a reason when you abort one.
-Non-interactive sessions fail closed unless `bash-guard-auto-allow` is enabled.
-The subagents extension reuses this policy in its `safe_bash` tool.
-
-Each decision is recorded in `bash-guard/decisions.jsonl` below the agent directory.
-`/bash-guard stats` shows how often flagged commands were approved or rejected,
-by reason, with the reasons you gave, and estimates the same from older sessions.
-Pass a copied log from another machine, as in `/bash-guard stats ~/work-decisions.jsonl`,
-to count both together.
-
 ### Save Markdown
 
 `extensions/save-md.ts` adds `/save-md name`.
@@ -196,10 +171,11 @@ The worker receives file tools and `safe_bash`.
 All three can ask the parent with `ask_parent`.
 Agent definitions cannot request the raw `bash` tool.
 
-`safe_bash` blocks every command that bash-guard flags, and also
-`git commit`, `git pull`, and `git stash`, which belong to the parent session.
-A subagent that needs such a command asks the parent,
-which runs it under bash-guard, so you still decide.
+`safe_bash` uses the command policy in `lib/bash-policy.ts`.
+It blocks file deletion, local rebases, process termination, and recursive metadata changes,
+as well as `git commit`, `git pull`, and `git stash`, which belong to the parent session.
+A subagent that needs a blocked command asks the parent.
+The parent decides whether to run it with its normal Bash tool.
 Subagents never ask you questions.
 An agent that needs an answer calls `ask_parent`, and its run ends with the question.
 The parent model answers by continuing the subagent's session,

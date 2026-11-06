@@ -56,12 +56,12 @@
   With a parent UI, child notifications appear there,
   prefixed with the session id.
 - `safe_bash` blocks every command that the shared bash policy catches,
-  including the parent-session Git operations bash-guard lets the user run.
+  including Git operations reserved for the parent session.
   The error lists each blocked step with its reason and tells the subagent
   to use a safer command or to ask the agent that gave it the task.
 - A command the work needs but `safe_bash` blocks goes through the parent.
   The subagent asks with `ask_parent`, and the parent runs the command
-  with its own Bash, where bash-guard asks the user.
+  with its own Bash after deciding whether it is appropriate.
 - Subagents do not ask the user questions.
   `ask_parent` ends the run with `terminate: true`, so the question
   is the run's last word, and the result tells the parent model
@@ -158,7 +158,7 @@
   The list reads only the first 8 KB of each file,
   so a long history stays fast.
 - The opened session runs with the user's normal setup:
-  tools, skills, extensions, and bash-guard.
+  tools, skills, and extensions.
   The agent's role prompt does not apply there.
 - A switch replaces the extension runtime, so the way back lives in
   `subagents/returns.json` below the agent directory.
