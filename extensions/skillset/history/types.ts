@@ -1,13 +1,22 @@
 export type SkillUsageEvent = {
-  skillName: string;
+  timestamp: string;
+  kind: "explicit";
+  skill: { name: string; path: string; bodyHash: string | null };
   project: string;
-  timestamp: number;
-  sourceId: string;
+  sessionId: string | null;
+  entryId: string | null;
 };
 
-export type SkillUsageSummary = {
-  skillName: string;
-  invocations: number;
-  /** Sum of per-event decay weights: 1 when fresh, halved every 30 days. */
-  frecency: number;
+export type SkillUsageCollection = {
+  events: SkillUsageEvent[];
+  sessionsAnalyzed: number;
+  errors: Array<{ sessionFile: string; message: string }>;
+};
+
+export type SkillUsageReport = {
+  schemaVersion: 1;
+  generatedAt: string;
+  scan: Pick<SkillUsageCollection, "sessionsAnalyzed" | "errors">;
+  summary: { explicitInvocations: number };
+  events: SkillUsageEvent[];
 };

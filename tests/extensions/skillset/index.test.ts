@@ -23,8 +23,8 @@ test("the combined extension registers palette and policy features", () => {
 
   assert.deepEqual(commands, ["skill", "skill-policy", "usage"]);
   assert.deepEqual(renderers, []);
-  // Palette prewarm and policy filtering both hook the agent start.
-  assert.deepEqual(events, ["before_agent_start", "before_agent_start"]);
+  // Only policy filtering hooks the agent start.
+  assert.deepEqual(events, ["before_agent_start"]);
 });
 
 test("a visible feature failure does not prevent later registration", () => {

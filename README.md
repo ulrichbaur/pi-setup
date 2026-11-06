@@ -33,16 +33,22 @@ When the variable is unset, use `~/.pi/agent/settings.json`.
 - `/skill` opens a searchable picker and queues a skill for the next message.
   It reads the skills Pi has actually loaded,
   so package `skills` filters in `settings.json` apply.
-  Recently and frequently used skills sort first.
-  Unused skills follow in alphabetical order.
+  Skills appear in alphabetical order.
+  The picker does not scan session history.
 - `/skill-policy` controls which loaded skills the model may see and invoke on its own.
   Manual `/skill:name` commands still reach every skill.
   The policy fails closed: by default the model sees no skills,
   and a malformed policy also hides all skills.
-- `/usage` opens a read-only survey of skill usage, rebuilt from Pi's session logs.
-  It shows all-time counts per skill and per project,
-  and trends over 7, 14, 30, and 90 days.
-  A session that cannot be analyzed is reported, and the other tools keep working.
+- `/usage` takes no arguments and exports explicit native skill invocations from saved Pi session logs.
+  It writes a unique timestamped JSON file under `<getAgentDir()>/skill-usage/`
+  and shows the full path, invocation count, successful session count, and scan error count.
+  `getAgentDir()` respects `PI_CODING_AGENT_DIR`.
+  Malformed files appear in the report's errors; other files still scan.
+  Reports never overwrite earlier reports and have no cleanup or latest pointer.
+  History scans run only when you invoke `/usage`.
+  The export contains metadata, not prompts, messages, or tool output.
+  Historical body hashes come from saved expansions, not current skill files.
+  See [`DESIGN.md`](extensions/skillset/DESIGN.md) for the schema and historical-format limits.
 
 Remove `npm:pi-skill-palette` from `settings.json` before you enable this extension.
 Otherwise Pi has two `/skill` commands and has to tell them apart.
