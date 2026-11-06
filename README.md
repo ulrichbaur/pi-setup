@@ -128,14 +128,6 @@ It shows estimated context categories, usage, cache and cost statistics,
 and suggestions for compaction.
 It requires TUI mode.
 
-### Linked Markdown
-
-`extensions/md-link.ts` adds a collaborative Markdown workflow.
-`/link-md path` links a file and creates it when needed.
-`/unlink-md` removes the link.
-`/send-diff` and `/sd` send changes made to the file outside Pi as a user message.
-Final assistant replies are appended to the linked file.
-
 ### Save Markdown
 
 `extensions/save-md.ts` adds `/save-md name`.

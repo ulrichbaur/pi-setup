@@ -15,7 +15,7 @@ test("every extension entry point loads and exports a default function", async (
     ...(await collect("extensions/*.ts")),
     ...(await collect("extensions/*/index.ts")),
   ];
-  assert.ok(entries.length >= 10, `found ${entries.length} entry points`);
+  assert.ok(entries.length > 0, "no extension entry points found");
 
   for (const entry of entries) {
     const module = await import(pathToFileURL(resolve(entry)).href);
