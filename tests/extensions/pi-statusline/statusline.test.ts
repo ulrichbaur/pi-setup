@@ -85,9 +85,14 @@ test("statusline installs one footer, rerenders, and restores it on shutdown", a
   const component = factory(
     { requestRender: () => renders++ },
     { fg: (_color: string, text: string) => text },
-    { getGitBranch: () => "main", onBranchChange: () => () => {} },
+    {
+      getGitBranch: () => "main",
+      onBranchChange: () => () => {},
+      getExtensionStatuses: () => new Map([["background-tasks", "1 running"]]),
+    },
   );
   assert.match(component.render(100)[0], /pi-temp-extensions \(main\)/);
+  assert.equal(component.render(100).at(-1)?.trim(), "1 running");
 
   await runtime.update(ctx);
   assert.equal(renders, 1);
@@ -175,7 +180,7 @@ test("statusline redraws while idle and refreshes once a window resets", async (
   factory(
     { requestRender: () => renders++ },
     { fg: (_color: string, text: string) => text },
-    { getGitBranch: () => null },
+    { getGitBranch: () => null, getExtensionStatuses: () => new Map() },
   );
 
   // 30 s: the reset at 45 s has not passed, so the tick only redraws.
@@ -260,7 +265,11 @@ test("a reported subagent cost survives later updates and redraws", async () => 
   const component = factory(
     { requestRender: () => renders++ },
     { fg: (_color: string, text: string) => text },
-    { getGitBranch: () => "main", onBranchChange: () => () => {} },
+    {
+      getGitBranch: () => "main",
+      onBranchChange: () => () => {},
+      getExtensionStatuses: () => new Map(),
+    },
   );
 
   runtime.setSubagentCost(0.045);

@@ -180,6 +180,34 @@ It contacts only the requested URL, and there is no third-party reader to fall b
 A page that needs JavaScript to render therefore fails with an explicit error.
 Responses and the output the model sees have explicit size limits.
 
+### Background tasks
+
+`task_start` runs a shell command in the background and returns its log path.
+Jobs and their logs survive closing Pi. Resume the same session to see them.
+The default timeout is 30 minutes. Set `timeoutMs` to `0` for jobs that should run until stopped.
+
+**Do not append `&` to a command passed to `task_start`.** Pi already runs it in the background.
+Use `npm test`, not `npm test &`.
+
+Pi marks the task finished when its shell exits. If the shell leaves a child running,
+Pi can no longer stop it from `/tasks` or enforce the task timeout.
+If your script intentionally starts parallel workers with `&`, use `wait` to keep the shell alive until they finish.
+
+Open `/tasks` with **Alt+T**. Press Enter for output and `x` to stop a running job.
+Use `/tasks <id>` to open a job directly. The popup and notices show a five-character ID prefix, extended when needed to be unique in the session.
+The footer counts running jobs and unreviewed results. Open a finished job to mark it reviewed.
+
+In the terminal UI, a job completion reaches an active agent before its next model call or wakes an idle agent.
+Manual stops and completions missed while Pi was closed show a notice without starting a turn.
+Notices do not mark jobs reviewed. RPC, print, and JSON modes save results without waking the agent.
+
+Notice delivery is best effort. Pi marks a notice before handing it off for delivery to avoid duplicates.
+If Pi exits before delivering it, the notice may not replay on reopen.
+The result and log remain available in `/tasks`.
+
+To change the shortcut, put `{"shortcut":"alt+shift+t"}` in `background-tasks.json` in Pi’s agent directory.
+Use `{"shortcut":false}` to disable the shortcut without disabling `/tasks`. Run `/reload` after editing.
+
 ### Subagents
 
 `extensions/subagents/` adds the `subagent` tool with single and parallel modes.

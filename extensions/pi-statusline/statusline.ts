@@ -97,6 +97,13 @@ export function createStatuslineRuntime(
           ];
           const quota = truncateToWidth(latestQuotaLine, avail, "");
           if (quota) lines.push(pad + quota);
+          const statuses = [...footerData.getExtensionStatuses()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([, text]) => text.replace(/\s+/g, " ").trim())
+            .filter(Boolean)
+            .join(" ");
+          if (statuses)
+            lines.push(pad + truncateToWidth(statuses, avail, "..."));
           return lines;
         },
         dispose() {
