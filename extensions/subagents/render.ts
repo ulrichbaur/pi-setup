@@ -99,6 +99,11 @@ function renderAgent(
   }
   if (expanded && result.output && result.progress.status !== "running") {
     container.addChild(new Spacer(1));
+    if (result.progress.status === "timed_out") {
+      container.addChild(
+        new Text(theme.fg("warning", "Partial output:"), 0, 0),
+      );
+    }
     container.addChild(new Markdown(result.output, 0, 0, getMarkdownTheme()));
   } else if (result.progress.lastMessage) {
     container.addChild(
@@ -148,6 +153,9 @@ function addFooter(
 /** The text the parent model receives for one subagent run. */
 export function resultText(result: AgentResult): string {
   let text = result.output || (result.question ? "" : "(no output)");
+  if (result.progress.status === "timed_out") {
+    text = `Timed out: ${result.progress.error ?? "Runtime limit reached"}.${result.output ? `\n\nPartial output:\n${result.output}` : ""}`;
+  }
   if (result.question) {
     text += `${text ? "\n\n" : ""}The subagent asks: ${result.question}\nAnswer it by continuing the subagent: call subagent with session ${result.sessionId} and your answer as the task.`;
   }
@@ -156,6 +164,7 @@ export function resultText(result: AgentResult): string {
     text += `\n\nThe user sent the subagent these messages while it ran:\n${messages.join("\n")}`;
   }
   if (result.sessionFile) text += `\n\nSession: ${result.sessionId}`;
+  if (result.runId) text += `\n\nRun ID: ${result.runId}`;
   return text;
 }
 
@@ -171,9 +180,10 @@ export function combinedText(details: SubagentDetails): string {
 }
 
 export function backgroundText(results: AgentResult[]): string {
-  const ids = results.map((result) => result.sessionId).join(", ");
-  const arrival = `The result arrives as a message when ${results.length > 1 ? "all of them end" : "the run ends"}`;
-  return `Started in the background: ${ids}. ${arrival}. Continue with other work; do not wait or poll for it. The user can follow it with /agents.`;
+  const ids = results
+    .map((result) => `${result.sessionId} (run ID: ${result.runId})`)
+    .join(", ");
+  return `Started in the background: ${ids}. Each run sends a message when it ends. Use subagent_status for an on-demand check, not to poll for results. The user can follow it with /agents.`;
 }
 
 export function renderDetails(

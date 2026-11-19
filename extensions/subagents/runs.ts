@@ -4,6 +4,9 @@ const MAX_FINISHED_RUNS = 50;
 
 export interface SubagentRun {
   readonly result: AgentResult;
+  startedAt?: number;
+  // A restored launch without a saved completion has no recorded cost.
+  undelivered?: boolean;
   // Aborting it stops this run alone.
   readonly stop: AbortController;
 }

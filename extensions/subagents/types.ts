@@ -23,7 +23,7 @@ export interface UsageStats {
 }
 
 interface AgentProgress {
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "timed_out";
   currentTool?: string;
   currentToolArgs?: string;
   recentTools: ToolEvent[];
@@ -43,6 +43,8 @@ export interface AgentResult {
   model?: string;
   usage: UsageStats;
   progress: AgentProgress;
+  // A background invocation has its own ID even when it resumes a session.
+  runId?: string;
   // Absent in results saved before subagent sessions existed; sessionFile also
   // when a run failed before Pi wrote it.
   sessionId?: string;

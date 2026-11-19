@@ -1,10 +1,10 @@
 // A stand-in for `pi --mode rpc`. The mode selects the behavior:
 // "complete" finishes each prompt, "crash" exits during a prompt,
 // "hang" waits until it receives an abort command, and "linger" keeps
-// running after stdin closes.
+// running after stdin closes. "partial" streams text and waits for abort.
 import { createLineSplitter } from "../../../extensions/subagents/rpc.ts";
 
-const MODES = ["complete", "crash", "hang", "linger"];
+const MODES = ["complete", "crash", "hang", "linger", "partial"];
 
 // Tests that start the fake pass the mode as the first argument. The
 // extension starts it like Pi, with Pi's arguments; then FAKE_PI_MODE
@@ -53,6 +53,19 @@ const splitter = createLineSplitter((line) => {
     data: { disposition: "started" },
   });
   if (mode === "hang") return;
+  if (mode === "partial") {
+    send({ type: "message_start", message: { role: "assistant" } });
+    for (const update of [
+      { type: "text_start" },
+      { type: "text_delta", delta: "unfinished answer" },
+    ]) {
+      send({
+        type: "message_update",
+        assistantMessageEvent: { ...update, contentIndex: 0 },
+      });
+    }
+    return;
+  }
   send({
     type: "message_end",
     message: { role: "assistant", content: "line same line" },

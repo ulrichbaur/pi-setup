@@ -17,6 +17,7 @@ function savedResults(details: unknown): AgentResult[] {
 
 /** Identifies one run's result, saved or live, without object identity. */
 export function resultKey(result: AgentResult): string {
+  if (result.runId) return result.runId;
   return [
     result.agent,
     result.sessionId,
@@ -51,23 +52,26 @@ export function savedRuns(
       const background =
         isRecord(message.details) && message.details.background === true;
       for (const result of savedResults(message.details)) {
-        const run = finishedRun({ ...result });
+        const id = result.runId ?? result.sessionId;
+        const run = {
+          ...finishedRun({ ...result }),
+          undelivered: background && Boolean(id),
+        };
         runs.push(run);
-        if (background && result.sessionId) {
-          undelivered.set(result.sessionId, run);
-        }
+        if (background && id) undelivered.set(id, run);
       }
     } else if (
       entry.type === "custom_message" &&
       entry.customType === resultMessageType
     ) {
       for (const result of savedResults(entry.details)) {
-        const placeholder = result.sessionId
-          ? undelivered.get(result.sessionId)
-          : undefined;
-        if (placeholder) {
-          runs.splice(runs.indexOf(placeholder), 1);
-          undelivered.delete(result.sessionId as string);
+        const id = result.runId ?? result.sessionId;
+        if (id) {
+          const placeholder = undelivered.get(id);
+          if (placeholder) {
+            runs.splice(runs.indexOf(placeholder), 1);
+            undelivered.delete(id);
+          }
         }
         runs.push(finishedRun(result));
       }

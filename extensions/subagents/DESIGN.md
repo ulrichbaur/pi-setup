@@ -129,16 +129,20 @@
 - `maxConcurrency` limits all runs of the session at once,
   across tool calls and background runs, first come, first served.
   A waiting run shows as pending, and stopping it leaves the queue.
-- With `background: true`, the tool returns at once with the session ids.
-  The runs outlive the tool call, so its abort signal does not stop them;
-  `/agents` and session shutdown do.
+- With `background: true`, the tool returns at once with a unique ID per run and its session ID.
+  The runs outlive the tool call, so its abort signal does not stop them.
+  `/agents` and session shutdown can stop them.
 - The saved tool result lists which runs started, not their progress.
   A snapshot would show them running forever after a reload.
-- When all runs of the call end, one custom message carries the results.
-  For results that arrive one by one, the model starts each task
-  in its own background call.
-  The message starts a turn when the parent is idle
-  and follows the current run when it is busy.
+- Each run sends one custom completion message, even if other runs from the same call are still active.
+  Pi delivers it at the next steering boundary when the parent is busy, or starts a turn when it is idle.
+- The `subagent_status` tool reads a snapshot by run ID or lists all retained background runs.
+  Looking up a run does not affect delivery.
+  The TUI status line counts running and queued background runs.
+- A background run gets a 30-minute timeout when it takes a concurrency slot.
+  A launch can override `timeoutMs` for all tasks or for an individual task; `0` disables it.
+  A timeout stops the child and uses the same delivery path as other results.
+  Once the child reports settlement, the timer no longer applies to cleanup.
 - A session shutdown stops the background runs
   and cancels their delivery, so a late result never reaches another session.
   Their subagent sessions stay saved for a resume.

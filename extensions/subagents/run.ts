@@ -75,11 +75,13 @@ export function pendingResult(
   agent: string,
   task: string,
   sessionId: string,
+  runId?: string,
 ): AgentResult {
   return {
     agent,
     task,
     sessionId,
+    ...(runId && { runId }),
     output: "",
     exitCode: -1,
     usage: emptyUsage(),
@@ -245,6 +247,7 @@ export interface TaskRequest {
   task: string;
   cwd?: string;
   session?: string;
+  timeoutMs?: number;
 }
 
 interface RunPlan {
@@ -338,11 +341,19 @@ export function finalStatus(
   return exitedCleanly && !error ? "completed" : "failed";
 }
 
+class RunTimeout extends Error {
+  constructor(timeoutMs: number) {
+    super(`Subagent exceeded its ${timeoutMs} ms runtime limit`);
+  }
+}
+
 function abortReason(
   run: SubagentRun,
   context: RunContext,
 ): string | undefined {
   if (context.signal?.aborted) return "Subagent was aborted";
+  if (run.stop.signal.reason instanceof RunTimeout)
+    return run.stop.signal.reason.message;
   if (run.stop.signal.aborted) return "Stopped by the user";
   return undefined;
 }
@@ -352,6 +363,7 @@ async function runAgent(
   run: SubagentRun,
   context: RunContext,
   signal: AbortSignal,
+  timeoutMs: number,
   onUpdate?: (result: AgentResult) => void,
 ): Promise<AgentResult> {
   const { agent, task, cwd, target } = plan;
@@ -372,15 +384,28 @@ async function runAgent(
   result.messageStart =
     target.kind === "resume" ? countMessageEntries(target.path) : 0;
   const startedAt = Date.now();
+  run.startedAt = startedAt;
+  if (result.runId) onUpdate?.(result);
 
+  let partial = "";
+  const timer =
+    timeoutMs > 0
+      ? setTimeout(() => {
+          partial = contentText(result.live?.streaming?.content);
+          run.stop.abort(new RunTimeout(timeoutMs));
+        }, timeoutMs).unref()
+      : undefined;
   let runSettled = false;
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-subagent-"));
-  const promptPath = join(temporaryDirectory, `${agent.name}.md`);
+  let temporaryDirectory: string | undefined;
   try {
+    signal.throwIfAborted();
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-subagent-"));
+    const promptPath = join(temporaryDirectory, `${agent.name}.md`);
     await writeFile(promptPath, agent.systemPrompt, {
       encoding: "utf8",
       mode: 0o600,
     });
+    signal.throwIfAborted();
     const invocation = resolvePiInvocation(
       subagentArguments(
         agent.tools,
@@ -402,6 +427,7 @@ async function runAgent(
     });
     child.onRecord((record) => {
       if (record.type === "agent_settled") {
+        clearTimeout(timer);
         settle();
         return;
       }
@@ -445,6 +471,7 @@ async function runAgent(
       result.progress.error ??=
         error instanceof Error ? error.message : String(error);
     } finally {
+      clearTimeout(timer);
       signal.removeEventListener("abort", abort);
       result.exitCode = await child.close();
     }
@@ -464,19 +491,27 @@ async function runAgent(
     }
     runSettled = settledRun;
   } finally {
-    await rm(temporaryDirectory, { recursive: true, force: true });
+    clearTimeout(timer);
+    if (temporaryDirectory)
+      await rm(temporaryDirectory, { recursive: true, force: true });
   }
   result.progress.error = abortReason(run, context) ?? result.progress.error;
 
   result.progress.durationMs = Date.now() - startedAt;
-  result.progress.status = finalStatus(
-    result.exitCode,
-    runSettled,
-    result.progress.warning !== undefined,
-    result.progress.error,
-  );
-  if (!result.output && result.progress.error) {
-    result.output = `Error: ${result.progress.error}`;
+  if (run.stop.signal.reason instanceof RunTimeout) {
+    result.progress.status = "timed_out";
+    result.output = partial || result.output;
+    result.question = undefined;
+  } else {
+    result.progress.status = finalStatus(
+      result.exitCode,
+      runSettled,
+      result.progress.warning !== undefined,
+      result.progress.error,
+    );
+    if (!result.output && result.progress.error) {
+      result.output = `Error: ${result.progress.error}`;
+    }
   }
   const truncated = truncateHead(result.output, {
     maxLines: DEFAULT_MAX_LINES,
@@ -504,26 +539,42 @@ export async function runAll(
   update: () => void,
 ): Promise<AgentResult[]> {
   return Promise.all(
-    plans.map(async (plan, index) => {
-      const run = runs[index];
-      const signal = context.signal
-        ? AbortSignal.any([context.signal, run.stop.signal])
-        : run.stop.signal;
-      try {
-        await limiter.run(
-          () => runAgent(plan, run, context, signal, update),
-          signal,
-        );
-      } catch (error) {
-        run.result.live = undefined;
-        run.result.progress.status = "failed";
-        run.result.progress.error =
-          abortReason(run, context) ??
-          (error instanceof Error ? error.message : String(error));
-        run.result.output ||= `Error: ${run.result.progress.error}`;
-      }
-      update();
-      return run.result;
-    }),
+    plans.map((plan, index) =>
+      runOne(plan, runs[index], limiter, context, update),
+    ),
   );
+}
+
+export async function runOne(
+  plan: RunPlan,
+  run: SubagentRun,
+  limiter: Limiter,
+  context: RunContext,
+  update: () => void,
+  timeoutMs = 0,
+): Promise<AgentResult> {
+  const signal = context.signal
+    ? AbortSignal.any([context.signal, run.stop.signal])
+    : run.stop.signal;
+  try {
+    await limiter.run(
+      () => runAgent(plan, run, context, signal, timeoutMs, update),
+      signal,
+    );
+  } catch (error) {
+    const { result, startedAt } = run;
+    const timedOut = run.stop.signal.reason instanceof RunTimeout;
+    if (result.live)
+      releaseTranscript([...result.live.messages, result.live.streaming]);
+    result.live = undefined;
+    result.progress.status = timedOut ? "timed_out" : "failed";
+    if (startedAt !== undefined)
+      result.progress.durationMs = Date.now() - startedAt;
+    result.progress.error =
+      abortReason(run, context) ??
+      (error instanceof Error ? error.message : String(error));
+    if (!timedOut) result.output ||= `Error: ${result.progress.error}`;
+  }
+  update();
+  return run.result;
 }

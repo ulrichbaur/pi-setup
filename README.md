@@ -237,9 +237,16 @@ Pass that id as `session` with a follow-up `task` to continue the subagent with 
 
 Expanding a tool result shows only that run's conversation,
 live while it runs, with the same components as the main chat.
-With `background: true`, the tool returns at once.
-The result arrives later as a message and starts a model turn,
-or it waits for the current turn to end.
+With `background: true`, the tool returns at once with a run ID for each subagent.
+Each run sends its own completion message, even when launched in parallel.
+The message reaches a busy parent before its next model call, or starts a new turn if the parent is idle.
+The parent can call `subagent_status` to list retained background runs or pass `runId` to inspect one without waiting.
+The status line shows how many background subagents are running or queued.
+
+Background runs default to a 30-minute runtime limit, starting when a run gets a slot.
+Set `timeoutMs` at launch, or override it per entry in `tasks`. Use `0` to disable the limit.
+On timeout, the run stops and reports `timed_out` with any captured partial output.
+Foreground runs do not accept `timeoutMs`.
 Background runs stop when the session closes, and their sessions stay saved.
 
 `/agents` shows one row per subagent session, even while it runs.

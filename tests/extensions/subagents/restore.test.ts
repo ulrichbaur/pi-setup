@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { savedRuns } from "../../../extensions/subagents/restore.ts";
+import { resultKey, savedRuns } from "../../../extensions/subagents/restore.ts";
 import { fakeRun } from "./fake-run.ts";
 
 const TYPE = "subagent-result";
@@ -55,6 +55,39 @@ test("saved tool results and delivered messages become finished runs", () => {
       ["scout-00000001", "completed", undefined],
       ["worker-00000003", "failed", "Stopped when its session closed"],
       ["worker-00000002", "completed", undefined],
+    ],
+  );
+});
+
+test("background continuations restore by run ID rather than session ID", () => {
+  const sessionId = "scout-00000001";
+  const launch = (runId: string) =>
+    toolResult("subagent", {
+      background: true,
+      results: [{ ...result(sessionId, "pending"), runId }],
+    });
+  const first = { ...result(sessionId, "completed"), runId: "first" };
+  const restored = savedRuns(
+    [
+      launch("first"),
+      launch("second"),
+      {
+        type: "custom_message",
+        customType: TYPE,
+        details: { results: [first] },
+      },
+    ],
+    TYPE,
+  );
+  assert.deepEqual(
+    restored.map(({ result, undelivered }) => [
+      resultKey(result),
+      result.progress.status,
+      Boolean(undelivered),
+    ]),
+    [
+      ["second", "failed", true],
+      ["first", "completed", false],
     ],
   );
 });

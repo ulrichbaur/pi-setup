@@ -70,13 +70,29 @@ function load() {
       details: SubagentDetails;
     }>;
   };
+  let peek: (params: { runId?: string }) => Promise<{
+    details: Array<{
+      runId: string;
+      status: string;
+      elapsedMs: number;
+      error?: string;
+      result?: string;
+    }>;
+  }>;
   let delivered = () => {};
   const arrived = new Promise<void>((resolve) => {
     delivered = resolve;
   });
   const pi = {
-    registerTool: (definition: typeof tool) => {
-      tool = definition;
+    registerTool: (definition: typeof tool & { name: string }) => {
+      if (definition.name === "subagent_status") {
+        peek = (params) =>
+          definition.execute("status", params) as unknown as ReturnType<
+            typeof peek
+          >;
+      } else {
+        tool = definition;
+      }
     },
     registerCommand: (name: string, command: Command) => {
       commands[name] = command;
@@ -113,6 +129,7 @@ function load() {
     tool.execute("call", params, undefined, undefined, ctx);
   return {
     run,
+    peek: (params: { runId?: string } = {}) => peek(params),
     sent,
     arrived,
     handlers,
@@ -146,7 +163,8 @@ test("/agents rejects removed navigation actions and has no completions", async 
 });
 
 test("a background run returns at once and delivers its result later", async () => {
-  const { run, sent, arrived } = load();
+  const { run, sent, arrived, peek } = load();
+  assert.deepEqual((await peek()).details, []);
   const started = await run({
     agent: "scout",
     task: "look around",
@@ -155,6 +173,17 @@ test("a background run returns at once and delivers its result later", async () 
   assert.equal(started.details.background, true);
   assert.equal(started.details.results[0].progress.status, "pending");
   assert.match(started.content[0].text, /^Started in the background: scout-/);
+  const runId = started.details.results[0].runId;
+  assert.ok(runId);
+  assert.match(started.content[0].text, new RegExp(runId));
+  const status = (await peek({ runId })).details[0];
+  assert.equal(status.runId, runId);
+  assert.match(status.status, /^(pending|running)$/);
+  assert.ok(status.elapsedMs >= 0);
+  await assert.rejects(
+    peek({ runId: "unknown" }),
+    /Unknown background subagent run/,
+  );
   assert.equal(sent.length, 0);
   const row = renderDetails(started.details, false, theme, {
     invalidate: () => {},
@@ -170,7 +199,7 @@ test("a background run returns at once and delivers its result later", async () 
 
   await arrived;
   const [{ message, options }] = sent;
-  assert.deepEqual(options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.deepEqual(options, { triggerTurn: true, deliverAs: "steer" });
   assert.equal(message.customType, RESULT_MESSAGE_TYPE);
   assert.equal(message.display, true);
   assert.ok(
@@ -181,6 +210,9 @@ test("a background run returns at once and delivers its result later", async () 
   const details = message.details as SubagentDetails;
   assert.equal(details.results[0].progress.status, "completed");
   assert.equal(details.results[0].live, undefined);
+  assert.equal(details.results[0].runId, runId);
+  assert.equal((await peek({ runId })).details[0].result, "line same line");
+  assert.equal(sent.length, 1);
 });
 
 test("a foreground run waits for the child and returns its output", async () => {
@@ -250,6 +282,142 @@ test("background and foreground runs share one concurrency limit", async () => {
     );
     delete process.env.FAKE_PI_MODE;
   }
+});
+
+test("parallel background runs notify independently and get a full runtime after queuing", {
+  timeout: 8_000,
+}, async () => {
+  process.env.FAKE_PI_MODE = "hang";
+  const { run, registry, peek, sent, arrived, handlers } = load();
+  const footer: Array<string | undefined> = [];
+  handlers.session_start(
+    {},
+    {
+      mode: "tui",
+      sessionManager: { getBranch: () => [] },
+      ui: {
+        notify: () => {},
+        setStatus: (key: string, text?: string) => {
+          assert.equal(key, "subagents");
+          footer.push(text);
+        },
+      },
+    },
+  );
+  try {
+    const started = await run({
+      background: true,
+      timeoutMs: 40,
+      tasks: [
+        { agent: "scout", task: "unlimited", timeoutMs: 0 },
+        { agent: "scout", task: "limited" },
+      ],
+    });
+    const [first, second] = started.details.results;
+    assert.ok(first.runId && second.runId && first.runId !== second.runId);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.deepEqual(
+      (await peek()).details.map((entry) => entry.status),
+      ["pending", "running"],
+    );
+    assert.equal(sent.length, 0);
+    assert.equal(footer.at(-1), "Subagents: 1 running · 1 queued");
+
+    registry.stop(registry.active(first.sessionId as string)!);
+    await arrived;
+    assert.equal(
+      (sent[0].message.details as SubagentDetails).results[0].runId,
+      first.runId,
+    );
+    assert.equal(
+      (await peek({ runId: second.runId })).details[0].status,
+      "running",
+    );
+    await until(() => sent.length === 2);
+    const final = (await peek({ runId: second.runId })).details[0];
+    assert.equal(final.status, "timed_out");
+    assert.match(final.error ?? "", /40 ms runtime limit/);
+    assert.match(String(sent[1].message.content), /Timed out/);
+    assert.equal(footer.at(-1), undefined);
+  } finally {
+    handlers.session_shutdown();
+    await until(() =>
+      registry
+        .list()
+        .every(
+          ({ result }) =>
+            !["running", "pending"].includes(result.progress.status),
+        ),
+    );
+    delete process.env.FAKE_PI_MODE;
+  }
+});
+
+test("a timeout delivers captured streaming text as partial output", {
+  timeout: 8_000,
+}, async () => {
+  process.env.FAKE_PI_MODE = "partial";
+  const { run, arrived, sent } = load();
+  try {
+    await run({
+      agent: "scout",
+      task: "write slowly",
+      background: true,
+      timeoutMs: 600,
+    });
+    await arrived;
+    assert.match(
+      String(sent[0].message.content),
+      /Timed out: [^\n]+\n\nPartial output:\nunfinished answer/,
+    );
+    assert.equal(sent.length, 1);
+  } finally {
+    delete process.env.FAKE_PI_MODE;
+  }
+});
+
+test("a settled run keeps its result if cleanup outlasts the timeout", {
+  timeout: 8_000,
+}, async () => {
+  process.env.FAKE_PI_MODE = "linger";
+  const { run, arrived, sent, peek, handlers } = load();
+  try {
+    const started = await run({
+      agent: "scout",
+      task: "finish before cleanup",
+      background: true,
+      timeoutMs: 1_500,
+    });
+    const { runId } = started.details.results[0];
+    await arrived;
+    const [finished] = (await peek({ runId })).details;
+    assert.ok(finished.elapsedMs > 1_500);
+    assert.equal(finished.status, "completed");
+    assert.equal(sent.length, 1);
+  } finally {
+    handlers.session_shutdown();
+    delete process.env.FAKE_PI_MODE;
+  }
+});
+
+test("timeouts are validated and rejected for foreground runs", async () => {
+  const { run, registry } = load();
+  const request = { agent: "scout", task: "work" };
+  await assert.rejects(
+    run({ ...request, timeoutMs: 10 }),
+    /requires background/,
+  );
+  await assert.rejects(
+    run({ tasks: [{ ...request, timeoutMs: 10 }] }),
+    /requires background/,
+  );
+  for (const timeoutMs of [-1, 0.5, 2_147_483_648]) {
+    await assert.rejects(
+      run({ ...request, background: true, timeoutMs }),
+      /must be an integer/,
+    );
+  }
+  assert.deepEqual(registry.list(), []);
 });
 
 test("a session start rebuilds the list from the saved results", () => {

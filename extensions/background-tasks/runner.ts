@@ -12,8 +12,12 @@ import { createConnection } from "node:net";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const DEFAULT_TIMEOUT_MS = 30 * 60_000;
-export const MAX_TIMER_MS = 2_147_483_647;
+import {
+  DEFAULT_TIMEOUT_MS,
+  MAX_TIMER_MS,
+} from "../../lib/background-timeout.ts";
+
+export { DEFAULT_TIMEOUT_MS, MAX_TIMER_MS };
 
 export type JobState =
   | "starting"

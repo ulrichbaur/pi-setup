@@ -13,7 +13,7 @@ export type Reply =
   | { text: string }
   | { tool: string; args: Record<string, unknown> };
 
-export type Script = (messages: Message[]) => Reply;
+export type Script = (messages: Message[]) => Reply | Promise<Reply>;
 
 export function text(content: unknown): string {
   if (typeof content === "string") return content;
@@ -49,9 +49,9 @@ export async function startFakeModel(
     request.on("data", (data) => {
       body += data;
     });
-    request.on("end", () => {
+    request.on("end", async () => {
       const { messages } = JSON.parse(body) as { messages: Message[] };
-      const reply = script(messages);
+      const reply = await script(messages);
       const usage = {
         prompt_tokens: 1000,
         completion_tokens: 50,

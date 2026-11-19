@@ -5,7 +5,7 @@ import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, test } from "node:test";
-import { type Script, startFakeModel, text } from "./fake-model.ts";
+import { type Reply, type Script, startFakeModel, text } from "./fake-model.ts";
 
 // Drives the real Pi TUI in a private tmux server against a fake model.
 // Run it with `pnpm test:tui`; it needs tmux.
@@ -16,6 +16,18 @@ const PI_CLI = join(
   "node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
 );
 const hasTmux = spawnSync("tmux", ["-V"]).status === 0;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const busyChild = deferred<Reply>();
+const busyParent = deferred<Reply>();
+const busyParentStreaming = deferred<void>();
 
 // The parent sees SCENARIO prompts; the child uses the built-in scout role.
 const script: Script = (messages) => {
@@ -28,6 +40,7 @@ const script: Script = (messages) => {
 
   if (system.includes("You are a scout")) {
     const task = users[0] ?? "";
+    if (task.includes("TASK busy")) return busyChild.promise;
     if (task.includes("TASK wait")) return { tool: "ls", args: { path: "." } };
     if (task.includes("TASK ask")) {
       // A resumed session ends with the parent's answer.
@@ -39,12 +52,36 @@ const script: Script = (messages) => {
     return { tool: "ls", args: { path: "." } };
   }
 
-  if (lastText.includes("Background subagent result")) {
-    return { text: "Parent got the result" };
-  }
   const scenario = [...users]
     .reverse()
     .find((user) => user.includes("SCENARIO"));
+  if (scenario?.includes("busy")) {
+    if (lastText.includes("Background subagent result")) {
+      const readFinished = messages.some(
+        (message) =>
+          message.role === "tool" &&
+          text(message.content).includes("a file to list"),
+      );
+      return {
+        text: readFinished
+          ? "Parent got the result after read"
+          : "Parent lost read",
+      };
+    }
+    if (last?.role !== "tool") {
+      return {
+        tool: "subagent",
+        args: { agent: "scout", task: "TASK busy", background: true },
+      };
+    }
+    if (!lastText.includes("Started in the background:"))
+      return { text: "Parent missed steering" };
+    busyParentStreaming.resolve();
+    return busyParent.promise;
+  }
+  if (lastText.includes("Background subagent result")) {
+    return { text: "Parent got the result" };
+  }
   if (last?.role === "tool") {
     const asked = /The subagent asks: .*\n.*session (scout-[0-9a-f]{8})/.exec(
       lastText,
@@ -265,6 +302,7 @@ test("a live transcript stays read-only and the selected run can be cancelled", 
   type("SCENARIO live");
   press("Enter");
   await waitFor(/Parent waits for live run/);
+  await waitFor(/Subagents: 1 running/);
   type("/agents");
   press("Enter");
   await waitFor(/Subagents \(4\)/);
@@ -281,4 +319,26 @@ test("a live transcript stays read-only and the selected run can be cancelled", 
   await waitFor(/Subagents \(4\)/);
   press("Escape");
   await waitFor(/Parent got the result/);
+});
+
+test("a completion steers a busy parent without dropping its tool call", {
+  skip,
+  timeout: 30_000,
+}, async () => {
+  type("SCENARIO busy");
+  press("Enter");
+  try {
+    await busyParentStreaming.promise;
+    await waitFor(/Subagents: 1 running/);
+    busyChild.resolve({ text: "Scout finished during the parent stream" });
+    await waitFor(/^(?![\s\S]*Subagents: 1 running)/);
+    busyParent.resolve({ tool: "read", args: { path: "notes.txt" } });
+    const result = await waitFor(
+      /Parent got the result after read|Parent (missed steering|lost read)/,
+    );
+    assert.match(result, /Parent got the result after read/);
+  } finally {
+    busyChild.resolve({ text: "Scout finished" });
+    busyParent.resolve({ text: "Parent finished" });
+  }
 });

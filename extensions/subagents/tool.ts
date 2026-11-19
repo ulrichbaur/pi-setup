@@ -1,5 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import {
+  DEFAULT_TIMEOUT_MS,
+  MAX_TIMER_MS,
+} from "../../lib/background-timeout.ts";
 import type { SubagentConfig } from "./config.ts";
 import type { Limiter } from "./limiter.ts";
 import {
@@ -14,6 +19,7 @@ import {
   planRun,
   type RunContext,
   runAll,
+  runOne,
   type TaskRequest,
 } from "./run.ts";
 import type { RunRegistry, SubagentRun } from "./runs.ts";
@@ -22,6 +28,15 @@ import type { AgentDefinition, Delivery, SubagentDetails } from "./types.ts";
 
 const SESSION_DESCRIPTION =
   "Session id of an earlier subagent run to continue; task is then the follow-up message";
+
+const timeoutSchema = (description: string) =>
+  Type.Optional(
+    Type.Integer({
+      minimum: 0,
+      maximum: MAX_TIMER_MS,
+      description,
+    }),
+  );
 
 const TaskSchema = Type.Object({
   agent: Type.Optional(
@@ -34,6 +49,9 @@ const TaskSchema = Type.Object({
     }),
   ),
   session: Type.Optional(Type.String({ description: SESSION_DESCRIPTION })),
+  timeoutMs: timeoutSchema(
+    "Override the background runtime limit for this task. Use 0 to disable it.",
+  ),
 });
 
 /** State shared by all foreground and background calls. */
@@ -64,7 +82,7 @@ export function extensionTool(
       "To continue an earlier subagent with its context, pass its session id and a follow-up task instead of restating the context.",
       "When a subagent result ends with a question, answer it yourself by continuing that subagent with its session id and your answer as the task. Ask the user only when you cannot answer it.",
       "Set background: true for long work you do not need right away. The tool returns at once, and the result arrives later as a message; continue with other work and do not poll for it.",
-      "For background tasks whose results are useful on their own, start each in its own background call, so each result arrives when its run ends.",
+      "Each background subagent run sends its own result, even when launched in parallel. Use subagent_status to check a run only when needed.",
     ],
     parameters: Type.Object({
       agent: Type.Optional(
@@ -86,6 +104,9 @@ export function extensionTool(
       session: Type.Optional(
         Type.String({ description: `${SESSION_DESCRIPTION}, in single mode` }),
       ),
+      timeoutMs: timeoutSchema(
+        `Maximum runtime in milliseconds for each background subagent. Defaults to ${DEFAULT_TIMEOUT_MS} (30 minutes). Use 0 to disable it.`,
+      ),
       background: Type.Optional(
         Type.Boolean({
           description:
@@ -102,6 +123,7 @@ export function extensionTool(
         cwd?: string;
         session?: string;
         background?: boolean;
+        timeoutMs?: number;
       },
       signal: AbortSignal | undefined,
       onUpdate:
@@ -146,6 +168,23 @@ export function extensionTool(
           `At most ${config.maxParallelTasks} parallel subagent tasks are allowed`,
         );
       }
+      for (const timeoutMs of [
+        params.timeoutMs,
+        ...requests.map((request) => request.timeoutMs),
+      ]) {
+        if (timeoutMs === undefined) continue;
+        if (!params.background)
+          throw new Error("timeoutMs requires background: true");
+        if (
+          !Number.isInteger(timeoutMs) ||
+          timeoutMs < 0 ||
+          timeoutMs > MAX_TIMER_MS
+        ) {
+          throw new Error(
+            `timeoutMs must be an integer from 0 to ${MAX_TIMER_MS}`,
+          );
+        }
+      }
       const plans = requests.map((request) =>
         planRun(request, agents, ctx.cwd),
       );
@@ -165,7 +204,12 @@ export function extensionTool(
           .map((model) => `${model.provider}/${model.id}`),
       );
       const runs: SubagentRun[] = plans.map((plan) => ({
-        result: pendingResult(plan.agent.name, plan.task, plan.target.id),
+        result: pendingResult(
+          plan.agent.name,
+          plan.task,
+          plan.target.id,
+          params.background ? randomUUID() : undefined,
+        ),
         stop: new AbortController(),
       }));
       const update = () => {
@@ -196,19 +240,29 @@ export function extensionTool(
       if (params.background) {
         // The runs outlive this tool call, so its signal must not stop them.
         const background = { ...context, signal: undefined };
-        const token = delivery.start();
-        void runAll(plans, runs, limiter, background, () =>
-          registry.changed(),
-        ).then((results) => delivery.deliver(token, { mode, results }));
-        const started = runs.map((run) => run.result);
+        const started = runs.map((run, index) => {
+          const token = delivery.start();
+          const timeoutMs =
+            requests[index].timeoutMs ?? params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+          void runOne(
+            plans[index],
+            run,
+            limiter,
+            background,
+            () => registry.changed(),
+            timeoutMs,
+          ).then((result) =>
+            delivery.deliver(token, { mode: "single", results: [result] }),
+          );
+          const { agent, task, sessionId, runId } = run.result;
+          return pendingResult(agent, task, sessionId ?? "", runId);
+        });
         return {
           content: [{ type: "text" as const, text: backgroundText(started) }],
           details: {
             mode,
             background: true,
-            results: started.map(({ agent, task, sessionId }) => ({
-              ...pendingResult(agent, task, sessionId ?? ""),
-            })),
+            results: started,
           } as SubagentDetails,
         };
       }

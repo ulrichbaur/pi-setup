@@ -12,6 +12,7 @@ import { combinedText, renderDetails } from "./render.ts";
 import { resultKey, savedRuns } from "./restore.ts";
 import { RunRegistry } from "./runs.ts";
 import { pruneSessions } from "./sessions.ts";
+import { statusTool, watchSubagentStatus } from "./status.ts";
 import { extensionTool, type ToolServices } from "./tool.ts";
 import {
   type Delivery,
@@ -34,8 +35,7 @@ export default function subagents(
       return token;
     },
     deliver(token, details) {
-      pending.delete(token);
-      if (token.cancelled) return;
+      if (!pending.delete(token) || token.cancelled) return;
       pi.sendMessage(
         {
           customType: RESULT_MESSAGE_TYPE,
@@ -43,7 +43,7 @@ export default function subagents(
           display: true,
           details,
         },
-        { triggerTurn: true, deliverAs: "followUp" },
+        { triggerTurn: true, deliverAs: "steer" },
       );
     },
   };
@@ -56,6 +56,7 @@ export default function subagents(
     limiter: new Limiter(config.maxConcurrency),
   };
   pi.registerTool(extensionTool(config, agents, services));
+  pi.registerTool(statusTool(registry));
 
   pi.registerMessageRenderer<SubagentDetails>(
     RESULT_MESSAGE_TYPE,
@@ -79,7 +80,10 @@ export default function subagents(
       return container;
     },
   );
+  let disposeStatus: (() => void) | undefined;
   pi.on("session_shutdown", () => {
+    disposeStatus?.();
+    disposeStatus = undefined;
     for (const token of pending) token.cancelled = true;
     pending.clear();
     for (const run of registry.list()) registry.stop(run);
@@ -129,7 +133,9 @@ export default function subagents(
     const runs = savedRuns(entries, RESULT_MESSAGE_TYPE);
     // A result can appear twice when a message is both saved and pending.
     const costs = new Map(
-      runs.map((run) => [resultKey(run.result), run.result.usage.cost]),
+      runs
+        .filter((run) => !run.undelivered)
+        .map((run) => [resultKey(run.result), run.result.usage.cost]),
     );
     savedKeys = new Set(costs.keys());
     savedCost = [...costs.values()].reduce((sum, cost) => sum + cost, 0);
@@ -172,6 +178,9 @@ export default function subagents(
     if (registry.list().length === 0) {
       for (const run of runs) registry.add(run);
     }
+    disposeStatus?.();
+    disposeStatus =
+      ctx.mode === "tui" ? watchSubagentStatus(registry, ctx.ui) : undefined;
     if (pruned) return;
     pruned = true;
     pruneSessions(config.sessionRetentionDays).catch((error: unknown) => {
