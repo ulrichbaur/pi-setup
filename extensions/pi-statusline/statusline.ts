@@ -101,7 +101,8 @@ export function createStatuslineRuntime(
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, text]) => text.replace(/\s+/g, " ").trim())
             .filter(Boolean)
-            .join(" ");
+            // Statuses use "·" inside, so a different mark separates them.
+            .join(theme.fg("muted", " │ "));
           if (statuses)
             lines.push(pad + truncateToWidth(statuses, avail, "..."));
           return lines;

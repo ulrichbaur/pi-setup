@@ -88,11 +88,19 @@ test("statusline installs one footer, rerenders, and restores it on shutdown", a
     {
       getGitBranch: () => "main",
       onBranchChange: () => () => {},
-      getExtensionStatuses: () => new Map([["background-tasks", "1 running"]]),
+      getExtensionStatuses: () =>
+        new Map([
+          ["subagents", "Subagents: 1 running"],
+          ["empty", "  "],
+          ["background-tasks", "Tasks: 1 running"],
+        ]),
     },
   );
   assert.match(component.render(100)[0], /pi-temp-extensions \(main\)/);
-  assert.equal(component.render(100).at(-1)?.trim(), "1 running");
+  assert.equal(
+    component.render(100).at(-1)?.trim(),
+    "Tasks: 1 running │ Subagents: 1 running",
+  );
 
   await runtime.update(ctx);
   assert.equal(renders, 1);
