@@ -16,9 +16,9 @@ function formatDuration(milliseconds: number): string {
 /** One run as a single summary line. */
 export function agentRowText(run: SubagentRun, theme: Theme): string {
   const { result } = run;
-  return `${statusIcon(result, theme)} ${theme.bold(result.agent)}${result.agentSource ? ` [${result.agentSource}]` : ""} ${theme.fg(
+  return `${statusIcon(result, theme)} ${theme.bold(result.agent)} ${theme.fg(
     "dim",
-    `${result.sessionId ?? ""} · ${statusLabel(result)} · ${result.progress.toolCount} tools · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}`,
+    `${result.sessionId} · ${statusLabel(result)} · ${result.progress.toolCount} tools · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}`,
   )}`;
 }
 

@@ -22,10 +22,6 @@
   and sets concurrency, parallel task, and retention limits.
   Missing config uses defaults silently.
   Malformed config or an unknown agent name fails with the config path.
-- Migration: rename `agents.worker` to `agents.analyst` and remove other
-  custom-agent config entries.
-  There is no worker alias and no custom-agent support.
-  User files and saved state are not rewritten.
 
 ## Transport
 
@@ -117,9 +113,8 @@
   There is no input line, steering, queued follow-up, or session switching.
   Escape returns to the list and then closes the overlay.
 - Continuing a session belongs to the parent model through `subagent(session, task)`.
-- Historical results retain custom-agent provenance and user messages for display.
-  Historical editing and shell calls retain their transcript renderers,
-  but these tools are not registered or available to children.
+- Transcripts render the subagent tools with Pi's own renderers.
+  Any other tool call renders in the generic tool format.
 - `x` stops the selected session's active run, even if the detail view
   opened before that run started.
   The other runs of the same tool call continue,
@@ -205,8 +200,6 @@
 - A resume finds `*_<id>.jsonl`, reads the working directory from its header,
   and starts the child there with `--session <path>`.
   The built-in agent's current definition and model selection apply.
-  Old worker or custom-agent sessions fail clearly because their agent is unknown.
-  Their stored results and transcripts remain readable.
 - One session runs in at most one child at a time.
   The extension tracks the ids of running sessions,
   and a request for a running session fails.

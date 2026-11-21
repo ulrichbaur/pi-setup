@@ -259,7 +259,7 @@ export function extensionTool(
             ),
           );
           const { agent, task, sessionId, runId } = run.result;
-          return pendingResult(agent, task, sessionId ?? "", runId);
+          return pendingResult(agent, task, sessionId, runId);
         });
         return {
           content: [{ type: "text" as const, text: backgroundText(started) }],

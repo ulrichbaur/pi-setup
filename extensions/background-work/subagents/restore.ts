@@ -47,10 +47,9 @@ export function interruptedResults(
     .filter((run) => run.undelivered)
     .map(({ result }) => {
       const { sessionId } = result;
-      const hint =
-        sessionId && savedSession(sessionId)
-          ? `Interrupted: Pi closed the session before this run ended. Its subagent session ${sessionId} is saved. To finish the work, call subagent with that session and a follow-up task.`
-          : "Interrupted: Pi closed the session before this run ended. No subagent session was saved, so it cannot be continued. Launch it again if you still need it.";
+      const hint = savedSession(sessionId)
+        ? `Interrupted: Pi closed the session before this run ended. Its subagent session ${sessionId} is saved. To finish the work, call subagent with that session and a follow-up task.`
+        : "Interrupted: Pi closed the session before this run ended. No subagent session was saved, so it cannot be continued. Launch it again if you still need it.";
       return {
         ...result,
         output: hint,
@@ -77,7 +76,7 @@ export function savedRuns(
       const background =
         isRecord(message.details) && message.details.background === true;
       for (const result of savedResults(message.details)) {
-        const id = result.runId ?? result.sessionId;
+        const id = result.runId;
         const run = {
           ...finishedRun({ ...result }),
           undelivered: background && Boolean(id),
@@ -90,7 +89,7 @@ export function savedRuns(
       entry.customType === resultMessageType
     ) {
       for (const result of savedResults(entry.details)) {
-        const id = result.runId ?? result.sessionId;
+        const id = result.runId;
         if (id) {
           const placeholder = undelivered.get(id);
           if (placeholder) {

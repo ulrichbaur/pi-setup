@@ -176,6 +176,7 @@ test("progress tracks tools that run at the same time", () => {
   const result: Parameters<typeof applyEvent>[0] = {
     agent: "scout",
     task: "t",
+    sessionId: "scout-00000001",
     output: "",
     exitCode: -1,
     usage: {
@@ -222,6 +223,7 @@ test("a successful retry clears the failed turn's error", () => {
   const result: Parameters<typeof applyEvent>[0] = {
     agent: "scout",
     task: "t",
+    sessionId: "scout-00000001",
     output: "",
     exitCode: -1,
     usage: {
@@ -274,6 +276,7 @@ test("a question to the parent counts only when the run ends with it", () => {
   const result: Parameters<typeof applyEvent>[0] = {
     agent: "scout",
     task: "t",
+    sessionId: "scout-00000001",
     output: "",
     exitCode: -1,
     usage: {

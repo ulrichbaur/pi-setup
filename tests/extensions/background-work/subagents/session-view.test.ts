@@ -160,19 +160,12 @@ test("ask_parent continuation stays one row with continuous history while stream
   }
 });
 
-test("session rows deduplicate saved results and keep legacy results separate", () => {
+test("session rows deduplicate saved results of the same run", () => {
   const a = fakeRun("scout-12345678", "completed");
   a.result.usage.cost = 0.02;
   const duplicate = { ...a, result: { ...a.result } };
-  const legacy = fakeRun("legacy", "completed");
-  legacy.result.sessionId = undefined;
-  const rows = sessionRows([
-    a,
-    duplicate,
-    legacy,
-    { ...legacy, stop: new AbortController() },
-  ]);
-  assert.equal(rows.length, 3);
+  const rows = sessionRows([a, duplicate, fakeRun("scout-87654321")]);
+  assert.equal(rows.length, 2);
   assert.equal(rows[0].result.usage.cost, 0.02);
   assert.equal(a.result.usage.cost, 0.02);
 });

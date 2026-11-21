@@ -41,7 +41,7 @@ function taskItem(row: TaskRow, snapshot: Snapshot): Item {
 }
 
 function agentItem(run: SubagentRun): Item {
-  const id = run.result.sessionId ?? run.result.agent;
+  const id = run.result.sessionId;
   return { kind: "agent", key: `agent:${id}`, id, shortId: id, run };
 }
 

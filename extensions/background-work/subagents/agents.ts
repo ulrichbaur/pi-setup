@@ -90,7 +90,7 @@ export function loadAgents(config: SubagentConfig): AgentDefinition[] {
   for (const name of Object.keys(config.agents)) {
     if (!loadedNames.has(name)) {
       throw new Error(
-        `${CONFIG_PATH}: agents.${name} is not a built-in agent. Supported agents: ${AGENT_NAMES.join(", ")}. Replace agents.worker with agents.analyst; custom agents are no longer supported`,
+        `${CONFIG_PATH}: agents.${name} is not a built-in agent. Supported agents: ${AGENT_NAMES.join(", ")}`,
       );
     }
   }

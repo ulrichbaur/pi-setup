@@ -3,9 +3,9 @@ import { isActive, type SubagentRun } from "./runs.ts";
 
 /** Display-only session rows, newest first. The registry keeps individual runs. */
 export function sessionRows(runs: SubagentRun[]): SubagentRun[] {
-  const groups = new Map<string | SubagentRun, SubagentRun[]>();
+  const groups = new Map<string, SubagentRun[]>();
   for (const run of runs) {
-    const key = run.result.sessionId ?? run;
+    const key = run.result.sessionId;
     const group = groups.get(key) ?? [];
     group.push(run);
     groups.set(key, group);
@@ -37,7 +37,5 @@ export function sessionRows(runs: SubagentRun[]): SubagentRun[] {
 }
 
 export function sameSession(a: SubagentRun, b: SubagentRun): boolean {
-  return a.result.sessionId !== undefined
-    ? a.result.sessionId === b.result.sessionId
-    : a.stop === b.stop;
+  return a.result.sessionId === b.result.sessionId;
 }

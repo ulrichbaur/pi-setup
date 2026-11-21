@@ -63,7 +63,7 @@ function renderAgent(
   const tokens = result.usage.input + result.usage.output;
   container.addChild(
     new Text(
-      `${statusIcon(result, theme)} ${theme.fg("toolTitle", theme.bold(result.agent))}${result.agentSource ? theme.fg("dim", ` [${result.agentSource}]`) : ""} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}${result.sessionId ? ` · ${result.sessionId}` : ""}`)}`,
+      `${statusIcon(result, theme)} ${theme.fg("toolTitle", theme.bold(result.agent))} ${theme.fg("dim", `${result.progress.toolCount} tools · ${formatTokens(tokens)} tok · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""} · ${result.sessionId}`)}`,
       0,
       0,
     ),
@@ -180,10 +180,6 @@ export function resultText(result: AgentResult): string {
   if (result.question) {
     text += `${text ? "\n\n" : ""}The subagent asks: ${result.question}\nAnswer it by continuing the subagent: call subagent with session ${result.sessionId} and your answer as the task.`;
   }
-  if (result.userMessages?.length) {
-    const messages = result.userMessages.map((message) => `- ${message}`);
-    text += `\n\nThe user sent the subagent these messages while it ran:\n${messages.join("\n")}`;
-  }
   if (result.sessionFile) text += `\n\nSession: ${result.sessionId}`;
   if (result.runId) text += `\n\nRun ID: ${result.runId}`;
   return text;
@@ -218,7 +214,7 @@ export function renderDetails(
     for (const result of details.results) {
       container.addChild(
         new Text(
-          `${theme.fg("accent", "⇢")} ${theme.fg("toolTitle", theme.bold(result.agent))} ${theme.fg("dim", `${result.sessionId ?? ""} started in the background`)}`,
+          `${theme.fg("accent", "⇢")} ${theme.fg("toolTitle", theme.bold(result.agent))} ${theme.fg("dim", `${result.sessionId} started in the background`)}`,
           0,
           0,
         ),

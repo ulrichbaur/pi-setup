@@ -33,8 +33,8 @@ test("saved tool results and delivered messages become finished runs", () => {
         mode: "parallel",
         background: true,
         results: [
-          result("worker-00000002", "pending"),
-          result("worker-00000003", "pending"),
+          { ...result("worker-00000002", "pending"), runId: "run-2" },
+          { ...result("worker-00000003", "pending"), runId: "run-3" },
         ],
       }),
       {
@@ -42,7 +42,10 @@ test("saved tool results and delivered messages become finished runs", () => {
         customType: TYPE,
         details: {
           mode: "single",
-          results: [result("worker-00000002", "completed"), { agent: 1 }],
+          results: [
+            { ...result("worker-00000002", "completed"), runId: "run-2" },
+            { agent: 1 },
+          ],
         },
       },
       { type: "custom_message", customType: "other", details: {} },

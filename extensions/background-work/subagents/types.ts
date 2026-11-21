@@ -54,9 +54,8 @@ export interface AgentResult {
   progress: AgentProgress;
   // A background invocation has its own ID even when it resumes a session.
   runId?: string;
-  // Absent in results saved before subagent sessions existed; sessionFile also
-  // when a run failed before Pi wrote it.
-  sessionId?: string;
+  sessionId: string;
+  // Absent when a run failed before Pi wrote its session file.
   sessionFile?: string;
   cwd?: string;
   // The run's messages in the session file, counted in message entries.
@@ -64,12 +63,8 @@ export interface AgentResult {
   messageEnd?: number;
   // Present only while the run streams; the saved result reads the file.
   live?: LiveTranscript;
-  // Historical results may include messages sent through the former live UI.
-  userMessages?: string[];
   // The question the subagent asked its parent when its run ended.
   question?: string;
-  // Historical custom-agent provenance, retained for display only.
-  agentSource?: "user" | "project";
 }
 
 export interface SubagentDetails {
