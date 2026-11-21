@@ -204,7 +204,7 @@ test("a background run returns at once and delivers its result later", async () 
   assert.match(row[0], /^⇢ scout scout-[0-9a-f]{8} started in the background$/);
   assert.deepEqual(row.slice(1), [
     "Task: look around",
-    "Follow it with /agents.",
+    "Follow it with /tasks.",
   ]);
 
   await arrived;

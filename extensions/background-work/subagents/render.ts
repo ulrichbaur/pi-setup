@@ -195,7 +195,7 @@ export function backgroundText(results: AgentResult[]): string {
   const ids = results
     .map((result) => `${result.sessionId} (run ID: ${result.runId})`)
     .join(", ");
-  return `Started in the background: ${ids}. Each run sends a message when it ends. Use subagent_status for an on-demand check, not to poll for results. The user can follow it with /agents.`;
+  return `Started in the background: ${ids}. Each run sends a message when it ends. Use subagent_status for an on-demand check, not to poll for results. The user can follow it with /tasks.`;
 }
 
 export function renderDetails(
@@ -226,7 +226,7 @@ export function renderDetails(
       );
     }
     container.addChild(
-      new Text(theme.fg("dim", "Follow it with /agents."), 0, 0),
+      new Text(theme.fg("dim", "Follow it with /tasks."), 0, 0),
     );
     return container;
   }
