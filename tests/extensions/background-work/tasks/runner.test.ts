@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
   createJob,
@@ -8,6 +8,7 @@ import {
   jobDir,
   MAX_TIMER_MS,
   readJob,
+  sessionDir,
 } from "../../../../extensions/background-work/tasks/runner.ts";
 import { withTempDir } from "../../../helpers.ts";
 import { session } from "./fake-jobs.ts";
@@ -56,5 +57,15 @@ test("an invalid job spec is rejected before anything is written", async () => {
       );
     }
     assert.equal(existsSync(join(root, session)), false);
+  });
+});
+
+test("a session can use any ID that Pi accepts", async () => {
+  await withTempDir("pi-bg-runner-", async (root) => {
+    const { dir } = createJob(root, "my-run.2", { cwd: root, command: "true" });
+    assert.equal(dirname(dirname(dir)), root);
+    for (const id of ["../x", "a/b", ".x", "x.", ""]) {
+      assert.throws(() => sessionDir(root, id), /Invalid Pi session ID/, id);
+    }
   });
 });

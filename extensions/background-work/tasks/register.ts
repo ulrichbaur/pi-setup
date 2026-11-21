@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import {
   type ExtensionAPI,
   getAgentDir,
@@ -191,9 +191,18 @@ export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
     const root = storageRoot();
     // Any session's jobs are owned by this process, so only a TUI session
     // announces what ends, and only its own jobs.
+    let own: string;
+    try {
+      own = `${sessionDir(root, sessionId)}${sep}`;
+    } catch (error) {
+      ctx.ui.notify(
+        `Background tasks unavailable for this session: ${terminalText(String(error))}`,
+        "error",
+      );
+      return;
+    }
     if (ctx.mode === "tui") {
       disposers.push(watchTaskFooter(ctx.ui, registry));
-      const own = sessionDir(root, sessionId);
       disposers.push(
         registry.subscribe((job: Job, dir: string) => {
           if (!job.finishedAt || !dir.startsWith(own)) return;

@@ -59,8 +59,12 @@ export function saveJob(dir: string, job: Job): void {
   renameSync(temp, join(dir, "job.json"));
 }
 
+// Pi's own rule for session IDs. It allows no path separator, so the ID
+// stays a single folder below the root.
+const SESSION_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
+
 export function sessionDir(root: string, sessionId: string): string {
-  if (!isUuid(sessionId)) throw new Error("Invalid Pi session ID");
+  if (!SESSION_ID.test(sessionId)) throw new Error("Invalid Pi session ID");
   return resolve(root, sessionId);
 }
 

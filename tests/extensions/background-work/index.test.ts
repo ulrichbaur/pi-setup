@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -19,9 +19,15 @@ type Handler = (event: unknown, ctx: unknown) => unknown;
 async function load() {
   const tools: string[] = [];
   const starts: Handler[] = [];
+  const commands: Record<string, (args: string, ctx: unknown) => unknown> = {};
   const pi = {
     registerTool: ({ name }: { name: string }) => tools.push(name),
-    registerCommand: () => {},
+    registerCommand: (
+      name: string,
+      command: { handler: (args: string, ctx: unknown) => unknown },
+    ) => {
+      commands[name] = command.handler;
+    },
     registerShortcut: () => {},
     registerMessageRenderer: () => {},
     sendMessage: () => {},
@@ -45,7 +51,7 @@ async function load() {
     },
   };
   for (const handler of starts) await handler({}, ctx);
-  return { tools, notices };
+  return { tools, notices, commands };
 }
 
 test("a broken subagent config leaves the shell tasks working", async () => {
@@ -68,4 +74,38 @@ test("both features register when nothing fails", async () => {
     "task_stop",
   ]);
   assert.deepEqual(notices, []);
+});
+
+test("/tasks opens when the job records cannot be read", async () => {
+  writeFileSync(join(agentDir, "subagents.json"), "{}");
+  const sessionId = "my-run";
+  // A file where the session's job folder belongs makes reading it fail.
+  mkdirSync(join(agentDir, "background-tasks"), { recursive: true });
+  writeFileSync(join(agentDir, "background-tasks", sessionId), "");
+  const { commands } = await load();
+  const notices: string[] = [];
+  let screen = "";
+  await commands.tasks("", {
+    mode: "tui",
+    sessionManager: { getSessionId: () => sessionId },
+    ui: {
+      notify: (message: string) => notices.push(message),
+      custom: async (
+        factory: (...args: unknown[]) => { render(width: number): string[] },
+      ) => {
+        const view = factory(
+          { terminal: { rows: 30 }, requestRender: () => {} },
+          {
+            fg: (_color: string, text: string) => text,
+            bold: (t: string) => t,
+          },
+          { matches: () => false },
+          () => {},
+        );
+        screen = view.render(100).join("\n");
+      },
+    },
+  });
+  assert.deepEqual(notices, []);
+  assert.match(screen, /Shell tasks unavailable: Error: ENOTDIR/);
 });

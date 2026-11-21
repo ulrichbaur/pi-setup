@@ -89,9 +89,18 @@ export default async function backgroundWork(pi: ExtensionAPI): Promise<void> {
       return;
     }
     const view = sources(ctx.sessionManager.getSessionId());
+    let snapshot: Snapshot | undefined;
+    try {
+      snapshot = await snapshotOf(view);
+    } catch (error) {
+      // The shell section shows the error; subagents still list.
+      view.unavailable = [
+        ...view.unavailable,
+        `Shell tasks unavailable: ${terminalText(String(error))}`,
+      ];
+    }
     let component: BackgroundView | undefined;
     try {
-      const snapshot = await snapshotOf(view);
       let openKey: string | undefined;
       if (prefix) {
         const found = resolveItem(sectionsOf(view, snapshot), snapshot, prefix);
