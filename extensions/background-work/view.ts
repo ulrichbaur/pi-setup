@@ -44,6 +44,7 @@ export class BackgroundView {
   private detail?: { item: Item; pane: DetailPane };
   private error?: string;
   private reloading = false;
+  private reloadAgain = false;
   private closed = false;
   private readonly timer: NodeJS.Timeout;
   private readonly unsubscribe: Array<() => void> = [];
@@ -109,7 +110,12 @@ export class BackgroundView {
   }
 
   private async reload(): Promise<void> {
-    if (!this.sources.tasks || this.reloading || this.closed) return;
+    if (!this.sources.tasks || this.closed) return;
+    // A change during a read needs one more read after it.
+    if (this.reloading) {
+      this.reloadAgain = true;
+      return;
+    }
     this.reloading = true;
     try {
       this.snapshot = await this.sources.tasks.load();
@@ -128,6 +134,10 @@ export class BackgroundView {
       this.error = String(error);
     } finally {
       this.reloading = false;
+      if (this.reloadAgain && !this.closed) {
+        this.reloadAgain = false;
+        void this.reload();
+      }
       if (!this.closed) this.tui.requestRender();
     }
   }

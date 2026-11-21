@@ -159,3 +159,68 @@ test("a feature that failed to load shows its error in the list", async () => {
     view.dispose();
   });
 });
+
+test("a change during a read of the job records leads to one more read", async () => {
+  const id = "a1f03e00-0000-4000-8000-000000000009";
+  const snapshot = (state: "running" | "exited"): Snapshot => ({
+    rows: [
+      {
+        state,
+        dir: `/jobs/${id}`,
+        job: {
+          id,
+          command: "make",
+          cwd: "/",
+          timeoutMs: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          state,
+          ...(state === "exited" && {
+            exitCode: 0,
+            finishedAt: "2026-01-01T00:00:05.000Z",
+          }),
+        },
+      },
+    ],
+    errors: [],
+  });
+  let changed = () => {};
+  const jobs = {
+    stop: () => true,
+    subscribe: (listener: () => void) => {
+      changed = listener;
+      return () => {};
+    },
+  } as unknown as JobRegistry;
+  const reads: Array<(value: Snapshot) => void> = [];
+  const view = new BackgroundView(
+    { terminal: { rows: 40 }, requestRender() {} } as unknown as TUI,
+    theme,
+    keys,
+    () => {},
+    {
+      tasks: {
+        registry: jobs,
+        load: () => new Promise((resolve) => reads.push(resolve)),
+      },
+      unavailable: [],
+    },
+    snapshot("running"),
+  );
+  changed();
+  changed();
+  changed();
+  assert.equal(reads.length, 1);
+  reads[0](snapshot("running"));
+  await delay(0);
+  // The two changes during the first read lead to exactly one more read.
+  assert.equal(reads.length, 2);
+  reads[1](snapshot("exited"));
+  await delay(0);
+  assert.equal(reads.length, 2);
+  assert.match(
+    view.render(100).join("\n"),
+    /task {3}a1f03 +Completed \(exit 0\)/,
+  );
+  view.dispose();
+});
