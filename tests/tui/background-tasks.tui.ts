@@ -10,7 +10,7 @@ import {
   jobDir,
   readJob,
   saveJob,
-} from "../../extensions/background-tasks/runner.ts";
+} from "../../extensions/background-work/tasks/runner.ts";
 import { withTempDir } from "../helpers.ts";
 import { startFakeModel, text } from "./fake-model.ts";
 
@@ -177,7 +177,7 @@ test("/tasks manages jobs and announces results without interrupting tools", {
         "--no-skills",
         "--no-extensions",
         "--extension",
-        join(repo, "extensions/background-tasks/index.ts"),
+        join(repo, "extensions/background-work/index.ts"),
         "--extension",
         join(repo, "extensions/pi-statusline/index.ts"),
         "--session",

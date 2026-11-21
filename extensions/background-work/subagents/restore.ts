@@ -1,0 +1,113 @@
+import { isRecord } from "../../../lib/is-record.ts";
+import type { SubagentRun } from "./runs.ts";
+import type { AgentResult } from "./types.ts";
+
+const SUBAGENT_TOOL = "subagent";
+
+function savedResults(details: unknown): AgentResult[] {
+  if (!isRecord(details) || !Array.isArray(details.results)) return [];
+  return details.results.filter(
+    (result): result is AgentResult =>
+      isRecord(result) &&
+      typeof result.agent === "string" &&
+      typeof result.task === "string" &&
+      isRecord(result.progress),
+  );
+}
+
+/** Identifies one run's result, saved or live, without object identity. */
+export function resultKey(result: AgentResult): string {
+  if (result.runId) return result.runId;
+  return [
+    result.agent,
+    result.sessionId,
+    result.messageStart,
+    result.messageEnd,
+  ].join(":");
+}
+
+function finishedRun(result: AgentResult): SubagentRun {
+  return { result, stop: new AbortController() };
+}
+
+/**
+ * Oldest first. A background run without a delivered result
+ * ended when its session closed.
+ */
+/**
+ * The results to report for background launches that never delivered,
+ * because their session closed. `savedSession` tells whether the subagent's
+ * session file exists, so the run can be continued.
+ */
+export function interruptedResults(
+  runs: readonly SubagentRun[],
+  savedSession: (sessionId: string) => boolean,
+): AgentResult[] {
+  return runs
+    .filter((run) => run.undelivered)
+    .map(({ result }) => {
+      const { sessionId } = result;
+      const hint =
+        sessionId && savedSession(sessionId)
+          ? `Interrupted: Pi closed the session before this run ended. Its subagent session ${sessionId} is saved. To finish the work, call subagent with that session and a follow-up task.`
+          : "Interrupted: Pi closed the session before this run ended. No subagent session was saved, so it cannot be continued. Launch it again if you still need it.";
+      return {
+        ...result,
+        output: hint,
+        progress: { ...result.progress, lastMessage: hint },
+      };
+    });
+}
+
+export function savedRuns(
+  entries: readonly unknown[],
+  resultMessageType: string,
+): SubagentRun[] {
+  const runs: SubagentRun[] = [];
+  const undelivered = new Map<string, SubagentRun>();
+  for (const entry of entries) {
+    if (!isRecord(entry)) continue;
+    const message = entry.message;
+    if (
+      entry.type === "message" &&
+      isRecord(message) &&
+      message.role === "toolResult" &&
+      message.toolName === SUBAGENT_TOOL
+    ) {
+      const background =
+        isRecord(message.details) && message.details.background === true;
+      for (const result of savedResults(message.details)) {
+        const id = result.runId ?? result.sessionId;
+        const run = {
+          ...finishedRun({ ...result }),
+          undelivered: background && Boolean(id),
+        };
+        runs.push(run);
+        if (background && id) undelivered.set(id, run);
+      }
+    } else if (
+      entry.type === "custom_message" &&
+      entry.customType === resultMessageType
+    ) {
+      for (const result of savedResults(entry.details)) {
+        const id = result.runId ?? result.sessionId;
+        if (id) {
+          const placeholder = undelivered.get(id);
+          if (placeholder) {
+            runs.splice(runs.indexOf(placeholder), 1);
+            undelivered.delete(id);
+          }
+        }
+        runs.push(finishedRun(result));
+      }
+    }
+  }
+  for (const run of undelivered.values()) {
+    run.result.progress = {
+      ...run.result.progress,
+      status: "failed",
+      error: "Stopped when its session closed",
+    };
+  }
+  return runs;
+}

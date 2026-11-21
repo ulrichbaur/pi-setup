@@ -217,7 +217,7 @@ Use `{"shortcut":false}` to disable the shortcut without disabling `/tasks`. Run
 
 ### Subagents
 
-`extensions/subagents/` adds the `subagent` tool with single and parallel modes.
+`extensions/background-work/subagents/` adds the `subagent` tool with single and parallel modes.
 It provides scout, researcher, and analyst agents in isolated Pi processes.
 Only these built-in agents load.
 User `agents/` and project `.pi/agents/` files are ignored, including overrides.

@@ -175,7 +175,7 @@ function startPi(...args: string[]): void {
     "--no-skills",
     "--no-extensions",
     "--extension",
-    join(REPO, "extensions/subagents/index.ts"),
+    join(REPO, "extensions/background-work/index.ts"),
     "--extension",
     join(REPO, "extensions/pi-statusline/index.ts"),
     ...args,
