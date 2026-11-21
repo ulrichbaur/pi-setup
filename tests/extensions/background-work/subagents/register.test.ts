@@ -630,7 +630,18 @@ test("a session start reports interrupted launches once, without a turn", async 
   const sessionId = "scout-0000abcd";
   const sessions = join(agentDir, "subagents", "sessions");
   mkdirSync(sessions, { recursive: true });
-  writeFileSync(join(sessions, `2026-01-01_${sessionId}.jsonl`), "");
+  // The child had saved one answer that cost 0.05 before Pi closed.
+  writeFileSync(
+    join(sessions, `2026-01-01_${sessionId}.jsonl`),
+    `${JSON.stringify({
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [],
+        usage: { cost: { total: 0.05 } },
+      },
+    })}\n`,
+  );
   const launch = {
     type: "message",
     message: {
@@ -670,6 +681,8 @@ test("a session start reports interrupted launches once, without a turn", async 
   assert.match(String(message.content), /Run ID: run-1/);
   const details = message.details as SubagentDetails;
   assert.equal(details.interrupted, true);
+  // The saved message carries the run's cost, so totals include it.
+  assert.equal(details.results[0].usage.cost, 0.05);
 
   // Once the message is saved, the launch has its result.
   const again = start([

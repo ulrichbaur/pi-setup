@@ -30,12 +30,8 @@ import {
   emptyTranscript,
 } from "./transcript.ts";
 import { releaseTranscript } from "./transcript-view.ts";
-import type {
-  AgentDefinition,
-  AgentResult,
-  ToolEvent,
-  UsageStats,
-} from "./types.ts";
+import type { AgentDefinition, AgentResult, ToolEvent } from "./types.ts";
+import { addUsage, emptyUsage } from "./usage.ts";
 
 interface JsonEvent {
   type?: unknown;
@@ -58,17 +54,6 @@ function resolvePiInvocation(args: string[]): {
   return /^(node|bun)(\.exe)?$/.test(runtime)
     ? { command: "pi", args }
     : { command: process.execPath, args };
-}
-
-function emptyUsage(): UsageStats {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    cost: 0,
-    turns: 0,
-  };
 }
 
 export function pendingResult(
@@ -101,18 +86,6 @@ function toolArgsPreview(args: unknown): string {
     if (typeof args[key] === "string") return String(args[key]).slice(0, 100);
   }
   return JSON.stringify(args).slice(0, 100);
-}
-
-function addUsage(target: UsageStats, value: unknown): void {
-  if (!isRecord(value)) return;
-  target.input += typeof value.input === "number" ? value.input : 0;
-  target.output += typeof value.output === "number" ? value.output : 0;
-  target.cacheRead += typeof value.cacheRead === "number" ? value.cacheRead : 0;
-  target.cacheWrite +=
-    typeof value.cacheWrite === "number" ? value.cacheWrite : 0;
-  if (isRecord(value.cost) && typeof value.cost.total === "number") {
-    target.cost += value.cost.total;
-  }
 }
 
 // By call id: a model can run several tools at once.

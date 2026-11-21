@@ -170,7 +170,7 @@ export function registerSubagents(
     );
     const results = interruptedResults(
       runs.filter((run) => !live.has(run.result.runId)),
-      (sessionId) => findSession(sessionId) !== undefined,
+      (sessionId) => findSession(sessionId),
     );
     if (!results.length) return;
     const token = delivery.start();

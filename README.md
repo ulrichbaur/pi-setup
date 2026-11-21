@@ -296,6 +296,8 @@ That output holds the last finished message, then the message that was still str
 Background runs stop when the session closes, and their sessions stay saved.
 When the session is opened again, one message lists the interrupted runs without starting a turn.
 For each run, it says how to continue the subagent session, or to launch the run again if no session was saved.
+The run's cost so far comes from its saved subagent session, so it still counts toward the subagent cost.
+The message that was streaming when Pi closed may lack its final usage, so that cost can be slightly low.
 
 Each tool result shows its run's cost.
 Each subagent's detail header sums its retained runs once.

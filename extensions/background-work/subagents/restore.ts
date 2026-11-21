@@ -1,6 +1,8 @@
 import { isRecord } from "../../../lib/is-record.ts";
 import type { SubagentRun } from "./runs.ts";
+import { countMessageEntries } from "./transcript.ts";
 import type { AgentResult } from "./types.ts";
+import { sessionUsage } from "./usage.ts";
 
 const SUBAGENT_TOOL = "subagent";
 
@@ -34,28 +36,62 @@ function finishedRun(result: AgentResult): SubagentRun {
  * Oldest first. A background run without a delivered result
  * ended when its session closed.
  */
+/** Where the run's own messages start in its session file. */
+function runStart(runs: readonly SubagentRun[], index: number): number {
+  const { sessionId } = runs[index].result;
+  let start = 0;
+  for (const earlier of runs.slice(0, index)) {
+    const { result } = earlier;
+    if (earlier.undelivered || result.sessionId !== sessionId) continue;
+    start = Math.max(start, result.messageEnd ?? 0);
+  }
+  return start;
+}
+
 /**
  * The results to report for background launches that never delivered,
- * because their session closed. `savedSession` tells whether the subagent's
- * session file exists, so the run can be continued.
+ * because their session closed. `sessionFile` finds the subagent's session
+ * file: a run with one can be continued, and its saved messages give its
+ * usage and transcript.
  */
 export function interruptedResults(
   runs: readonly SubagentRun[],
-  savedSession: (sessionId: string) => boolean,
+  sessionFile: (sessionId: string) => string | undefined,
 ): AgentResult[] {
-  return runs
-    .filter((run) => run.undelivered)
-    .map(({ result }) => {
-      const { sessionId } = result;
-      const hint = savedSession(sessionId)
-        ? `Interrupted: Pi closed the session before this run ended. Its subagent session ${sessionId} is saved. To finish the work, call subagent with that session and a follow-up task.`
-        : "Interrupted: Pi closed the session before this run ended. No subagent session was saved, so it cannot be continued. Launch it again if you still need it.";
-      return {
-        ...result,
-        output: hint,
-        progress: { ...result.progress, lastMessage: hint },
-      };
+  const results: AgentResult[] = [];
+  runs.forEach((run, index) => {
+    if (!run.undelivered) return;
+    const { result } = run;
+    const { sessionId } = result;
+    const path = sessionFile(sessionId);
+    let usage = result.usage;
+    let range: Partial<AgentResult> = {};
+    let note = "";
+    if (path) {
+      const start = runStart(runs, index);
+      try {
+        usage = sessionUsage(path, start);
+        range = {
+          sessionFile: path,
+          messageStart: start,
+          messageEnd: countMessageEntries(path),
+        };
+      } catch (error) {
+        note = ` Its cost could not be read: ${error instanceof Error ? error.message : String(error)}.`;
+      }
+    }
+    const hint = path
+      ? `Interrupted: Pi closed the session before this run ended. Its subagent session ${sessionId} is saved. To finish the work, call subagent with that session and a follow-up task.${note}`
+      : "Interrupted: Pi closed the session before this run ended. No subagent session was saved, so it cannot be continued. Launch it again if you still need it.";
+    results.push({
+      ...result,
+      ...range,
+      usage,
+      output: hint,
+      progress: { ...result.progress, lastMessage: hint },
     });
+  });
+  return results;
 }
 
 export function savedRuns(

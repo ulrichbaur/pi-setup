@@ -183,6 +183,11 @@
   A finished run therefore counts before Pi saves its result.
 - Pi shows extensions a message before it saves it,
   so a subagent result counts from its `message_end` on.
+- A run interrupted when Pi closed never reports its usage.
+  On resume, its interrupted result sums the usage Pi saved with each assistant message
+  in the child's session file, from the end of that session's last saved result on.
+  The result also gets that message range, so its transcript can be shown.
+  A file that cannot be read leaves the cost at zero and says so in the result.
   Results count once, matched by agent, session id, and message range.
 - The total is reported only when it changes.
 
