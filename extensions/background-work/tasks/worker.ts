@@ -1,24 +1,48 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { readJob, saveJob } from "./runner.ts";
 
 export type WorkerEvent =
   | { type: "started" }
   | { type: "exited"; exitCode: number | null; signal: NodeJS.Signals | null }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string }
+  // After a stop: no process of the job is left.
+  | { type: "stopped" };
 
 const STOP_GRACE_MS = 5_000;
+const POLL_MS = 50;
+
+/** Whether any process of the group is left, zombies included. */
+function groupAlive(group: number): boolean {
+  try {
+    process.kill(-group, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function signalGroup(group: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-group, signal);
+  } catch {
+    // The group ended in the meantime.
+  }
+}
 
 function run(dir: string): void {
   if (!process.send)
     throw new Error("The job worker requires an IPC channel to Pi");
   // Pi may be gone. A send then fails, which the callback absorbs, and the
   // disconnect handler takes over.
-  const send = (event: WorkerEvent) => {
-    if (process.connected) process.send?.(event, undefined, {}, () => {});
+  const send = (event: WorkerEvent, then?: () => void) => {
+    if (process.connected) process.send?.(event, undefined, {}, () => then?.());
+    else then?.();
   };
   const job = readJob(dir);
+  let group: number | undefined;
   let stopping = false;
   let released = false;
   let exit:
@@ -44,17 +68,30 @@ function run(dir: string): void {
     }
   }
 
-  // The worker is the process-group leader and stays alive through escalation.
-  // It signals its own group, so it never targets a reused PID or group ID.
-  process.on("SIGTERM", () => {});
-  function stop() {
+  function done() {
+    send({ type: "stopped" }, () => process.exit(0));
+  }
+
+  /**
+   * The shell leads its own process group. The worker stops signalling as
+   * soon as the group is empty, so it never targets a reused group ID.
+   */
+  async function stop() {
     if (stopping) return;
     stopping = true;
-    process.kill(0, "SIGTERM");
-    setTimeout(() => process.kill(0, "SIGKILL"), STOP_GRACE_MS);
+    if (group === undefined) return done();
+    signalGroup(group, "SIGTERM");
+    const deadline = Date.now() + STOP_GRACE_MS;
+    while (groupAlive(group) && Date.now() < deadline) await delay(POLL_MS);
+    if (groupAlive(group)) {
+      signalGroup(group, "SIGKILL");
+      while (groupAlive(group)) await delay(POLL_MS);
+    }
+    done();
   }
+
   process.on("message", (msg) => {
-    if (msg === "stop") stop();
+    if (msg === "stop") void stop();
     if (msg === "release" && !stopping) {
       released = true;
       process.disconnect?.();
@@ -63,7 +100,7 @@ function run(dir: string): void {
   process.on("disconnect", () => {
     if (released) return;
     recordEnd();
-    stop();
+    void stop();
   });
 
   try {
@@ -71,8 +108,10 @@ function run(dir: string): void {
     try {
       const shell = spawn("/bin/sh", ["-c", job.command], {
         cwd: job.cwd,
+        detached: true,
         stdio: ["ignore", output, output],
       });
+      group = shell.pid;
       shell.once("spawn", () =>
         send({ type: "started" } satisfies WorkerEvent),
       );

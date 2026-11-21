@@ -59,14 +59,19 @@ test(
       const dir = await running(
         registry,
         root,
-        "(trap '' TERM; while :; do printf '.\\n'; sleep 0.05; done) & wait",
+        'sh -c \'trap "" TERM; echo $$ > child.pid; while :; do printf ".\\n"; sleep 0.05; done\' & wait',
       );
       const output = join(dir, "output.log");
       await until(() => readFileSync(output, "utf8").includes("."));
+      const child = Number(readFileSync(join(root, "child.pid"), "utf8"));
+      const startedAt = Date.now();
       assert.equal(registry.stop(readJob(dir).id), true);
       assert.equal(readJob(dir).state, "stopping");
       const job = await registry.waitForEnd(readJob(dir).id, 8_000);
       assert.equal(job?.state, "stopped");
+      // The child outlasts SIGTERM, so it ends only at the grace period.
+      assert.ok(Date.now() - startedAt >= 4_500);
+      assert.equal(alive(child), false);
       await delay(100);
       const final = readFileSync(output, "utf8");
       await delay(150);
@@ -74,6 +79,19 @@ test(
     });
   },
 );
+
+test("a stop ends as soon as the job's processes exit", options, async () => {
+  await withTempDir("pi-bg-registry-", async (root) => {
+    const registry = new JobRegistry();
+    const dir = await running(registry, root, "sleep 30");
+    const startedAt = Date.now();
+    assert.equal(registry.stop(readJob(dir).id), true);
+    const job = await registry.waitForEnd(readJob(dir).id, 8_000);
+    assert.equal(job?.state, "stopped");
+    assert.equal(job?.signal, "SIGTERM");
+    assert.ok(Date.now() - startedAt < 2_000);
+  });
+});
 
 test(
   "a finished job releases children the shell left running",

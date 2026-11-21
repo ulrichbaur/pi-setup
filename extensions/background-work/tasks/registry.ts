@@ -20,8 +20,9 @@ interface LiveJob {
 export type JobListener = (job: Job, dir: string) => void;
 
 /**
- * The jobs this Pi process runs. Each job has a worker that leads its process
- * group; when Pi exits, the worker stops the group and records the end.
+ * The jobs this Pi process runs. Each job has a worker that stops the job's
+ * process group on request; when Pi exits, the worker stops the group and
+ * records the end.
  */
 export class JobRegistry {
   private readonly live = new Map<string, LiveJob>();
@@ -44,15 +45,12 @@ export class JobRegistry {
       // A failed spawn rejects below; any later failure ends in the exit event.
     });
     worker.on("message", (event: WorkerEvent) => this.onEvent(entry, event));
+    // A worker that exits before Pi records the end failed.
     worker.on("exit", (exitCode, signal) => {
-      if (entry.stopReason && signal === "SIGKILL") {
-        this.finish(entry, entry.stopReason, entry.outcome);
-      } else {
-        this.finish(entry, "failed", {
-          ...entry.outcome,
-          error: `The job worker ended unexpectedly (${signal ?? `exit ${exitCode}`})`,
-        });
-      }
+      this.finish(entry, "failed", {
+        ...entry.outcome,
+        error: `The job worker ended unexpectedly (${signal ?? `exit ${exitCode}`})`,
+      });
     });
     try {
       await new Promise<void>((resolve, reject) => {
@@ -148,6 +146,9 @@ export class JobRegistry {
       case "error":
         if (!entry.stopReason)
           this.finish(entry, "failed", { error: event.error });
+        break;
+      case "stopped":
+        this.finish(entry, entry.stopReason ?? "stopped", entry.outcome);
         break;
     }
   }

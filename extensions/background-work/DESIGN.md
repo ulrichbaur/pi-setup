@@ -17,10 +17,15 @@ The subagent design is in `subagents/DESIGN.md`.
 - A job's record is `job.json` in its own folder, with `output.log` next to it.
   Pi writes the record when the job starts and when it ends.
 - Pi starts one worker per job, detached into its own process group, with an IPC channel.
-  The worker starts `/bin/sh -c` and writes its output to the log.
+  The worker starts `/bin/sh -c` in a further process group of its own, and writes its output to the log.
   The `JobRegistry` in Pi owns the worker and enforces the timeout.
-- A stop asks the worker to send `SIGTERM` to its group, then `SIGKILL` after 5 seconds.
-  The worker stays alive through the escalation, so it never signals a reused process group.
+- A stop asks the worker to send `SIGTERM` to the shell's group.
+  The worker checks every 50 ms whether the group has a process left,
+  and sends `SIGKILL` after 5 seconds if one remains.
+  Once the group is empty, it reports `stopped` to Pi and exits.
+- The worker stays outside the shell's group, so it can tell when the group is empty.
+  It stops signalling as soon as the group is gone.
+  A process ID is not reused while its group exists, so it never signals a reused group.
 - After a normal exit, Pi releases the worker.
   A child that the shell left running keeps running and is no longer controlled.
 - Jobs end with Pi.

@@ -270,8 +270,8 @@ test("/tasks manages jobs and announces results without interrupting tools", {
       press("End");
       await screen(/^41 {2}live update$/m);
       press("x");
-      await screen(/Stopping/);
-      await screen(/Stopped/);
+      // The job obeys SIGTERM, so it passes "Stopping" too fast to see.
+      await screen(/Stopped \(SIGTERM\)/);
       // Escape leaves the details, then closes the view.
       press("Escape");
       await screen(/Background work/);
