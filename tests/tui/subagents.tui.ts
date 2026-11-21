@@ -96,6 +96,9 @@ const script: Script = (messages) => {
     return busyParent.promise;
   }
   if (lastText.includes("Background subagent result")) {
+    // A user stop must not start a turn, so this reply marks a bug.
+    if (scenario?.includes("live"))
+      return { text: "Parent reacted to the stop" };
     return { text: "Parent got the result" };
   }
   if (last?.role === "tool") {
@@ -345,7 +348,10 @@ test("a live transcript stays read-only and the selected run can be cancelled", 
   press("Escape");
   await waitFor(/Subagents \(4\)/);
   press("Escape");
-  await waitFor(/Parent got the result/);
+  // The stopped result shows in the chat, but the parent stays idle.
+  await waitFor(/^(?![\s\S]*Subagents \(4\))[\s\S]*Error: Stopped by the user/);
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  assert.doesNotMatch(screen(), /Parent reacted to the stop/);
 });
 
 test("a completion steers a busy parent without dropping its tool call", {
