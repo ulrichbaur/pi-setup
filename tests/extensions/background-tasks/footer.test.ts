@@ -6,12 +6,11 @@ import type { TaskRow } from "../../../extensions/background-tasks/task-store.ts
 
 function row(
   state: JobState | "unknown",
-  fields: { exitCode?: number; finished?: boolean; reviewed?: boolean } = {},
+  fields: { exitCode?: number; finished?: boolean } = {},
 ): TaskRow {
   return {
     state,
     dir: "/jobs/x",
-    reviewed: fields.reviewed ?? false,
     job: {
       id: "00112233-4455-6677-8899-aabbccddeeff",
       command: "true",
@@ -26,19 +25,19 @@ function row(
   };
 }
 
-test("the footer status is labeled and lists counts", () => {
+test("the footer status is labeled and counts only current jobs", () => {
   assert.equal(
     footerText(
       [
         row("running"),
         row("exited", { finished: true, exitCode: 2 }),
-        row("exited", { finished: true, exitCode: 0, reviewed: true }),
+        row("exited", { finished: true, exitCode: 0 }),
         row("unknown"),
       ],
       [],
       true,
     ),
-    "Tasks: 1 running · 1 unreviewed (1 failed) · 1 unknown",
+    "Tasks: 1 running · 1 unknown",
   );
 });
 
@@ -50,10 +49,13 @@ test("unavailable jobs and notices are named without repeating the label", () =>
   assert.equal(footerText([], ["x: broken"], true), "Tasks: some unavailable");
 });
 
-test("nothing to report shows no status", () => {
+test("finished jobs alone show no status", () => {
   assert.equal(
     footerText(
-      [row("exited", { finished: true, exitCode: 0, reviewed: true })],
+      [
+        row("exited", { finished: true, exitCode: 0 }),
+        row("exited", { finished: true, exitCode: 2 }),
+      ],
       [],
       true,
     ),

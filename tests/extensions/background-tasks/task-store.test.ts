@@ -10,7 +10,6 @@ import {
 import {
   LOG_PAGE_BYTES,
   LogLineIndex,
-  markReviewed,
   readLogPage,
   sessionTasks,
   terminalText,
@@ -21,8 +20,8 @@ const id = "00112233-4455-6677-8899-aabbccddeeff";
 const owner = "10112233-4455-6677-8899-aabbccddeeff";
 const otherSession = "20112233-4455-6677-8899-aabbccddeeff";
 
-test("reviewing a finished job persists only for the owning session", async () => {
-  await withTempDir("background-review-", async (root) => {
+test("a session lists only its own jobs", async () => {
+  await withTempDir("background-session-", async (root) => {
     const dir = jobDir(root, owner, id);
     await mkdir(dir, { recursive: true });
     const job: Job = {
@@ -39,9 +38,10 @@ test("reviewing a finished job persists only for the owning session", async () =
     saveJob(dir, job);
     const { rows, errors } = await sessionTasks(root, owner);
     assert.deepEqual(errors, []);
-    assert.equal(rows[0].reviewed, false);
-    await markReviewed(rows[0]);
-    assert.equal((await sessionTasks(root, owner)).rows[0].reviewed, true);
+    assert.deepEqual(
+      rows.map((row) => [row.job.id, row.state]),
+      [[id, "exited"]],
+    );
     assert.deepEqual((await sessionTasks(root, otherSession)).rows, []);
   });
 });

@@ -20,7 +20,6 @@ test("notices distinguish live completions, missed completions, and manual stops
       return {
         dir,
         state,
-        reviewed: false,
         job: {
           id,
           state,
@@ -51,7 +50,6 @@ test("notices distinguish live completions, missed completions, and manual stops
     assert.deepEqual(sent[0][1], { deliverAs: "steer", triggerTurn: false });
     assert.match(String(sent[1][0].content), /timed out\.[\s\S]*\/tasks live/);
     assert.deepEqual(sent[1][1], { deliverAs: "steer", triggerTurn: true });
-    assert.ok(rows.every((row) => !row.reviewed));
     assert.equal(publish(rows), true);
     assert.equal(createTaskNotices(pi, openedAt + 10)(rows), true);
     assert.equal(sent.length, 2);

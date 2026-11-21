@@ -5,27 +5,13 @@ const KEY = "background-tasks";
 
 export function taskSummary(rows: TaskRow[]): string | undefined {
   let running = 0;
-  let unreviewed = 0;
-  let failed = 0;
   let unknown = 0;
   for (const row of rows) {
     if (active(row)) running++;
     if (row.state === "unknown") unknown++;
-    if (!row.job.finishedAt || row.reviewed) continue;
-    unreviewed++;
-    if (
-      row.state === "failed" ||
-      row.state === "timed_out" ||
-      (row.state === "exited" && row.job.exitCode !== 0)
-    )
-      failed++;
   }
   const parts = [];
   if (running) parts.push(`${running} running`);
-  if (unreviewed)
-    parts.push(
-      `${unreviewed} unreviewed${failed ? ` (${failed} failed)` : ""}`,
-    );
   if (unknown) parts.push(`${unknown} unknown`);
   return parts.length ? parts.join(" · ") : undefined;
 }

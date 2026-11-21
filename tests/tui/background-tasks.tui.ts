@@ -153,13 +153,12 @@ test("/tasks manages jobs and announces results without interrupting tools", {
         sessionFile,
       );
       await screen(/Details: \/tasks 00112\s*$/m);
-      await screen(/Tasks: 1 running · 1 unreviewed \(1 failed\)/);
+      await screen(/Tasks: 1 running(?! ·)/);
       assert.equal(modelCalls, 0);
       tmux("send-keys", "-t", "tasks", "-l", "Unsubmitted draft");
       press("M-t");
-      const list = await screen(/Failed \(exit 2\).*unreviewed.*Past job/);
+      const list = await screen(/Failed \(exit 2\) · [^·]+ · Past job/);
       assert.match(list, /> [0-9a-f-]{5,36} · Running.*Live job[\s\S]*History/);
-      assert.equal(existsSync(join(pastDir, "reviewed")), false);
       press("Enter");
       const tail = await screen(/^40 {2}line-40$/m);
       assert.match(tail, /Output \(following\) · lines 29–40 of 40/);
@@ -253,8 +252,7 @@ test("/tasks manages jobs and announces results without interrupting tools", {
       press("c");
       const expanded = await screen(/^exit 2$/m);
       assert.match(expanded, /^1 {2}past output$/m);
-      assert.equal(existsSync(join(pastDir, "reviewed")), true);
-      await screen(/^(?![\s\S]*\d+ (?:running|unreviewed))[\s\S]*fake-model/);
+      await screen(/^(?![\s\S]*\d+ running)[\s\S]*fake-model/);
       press("Escape");
       await screen(
         /^(?![\s\S]*╭─+╮)[\s\S]*Background task \(Live job\) stopped/,

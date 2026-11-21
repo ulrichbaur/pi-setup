@@ -19,7 +19,6 @@ import {
   displayJobId,
   type LogAnchor,
   LogLineIndex,
-  markReviewed,
   readLogPage,
   type sessionTasks,
   type TaskRow,
@@ -128,7 +127,6 @@ export class TaskView {
       if (this.details) {
         const row = this.row(this.details);
         if (row) {
-          await markReviewed(row);
           if (this.viewport.following && !this.logBusy && !this.searchInput)
             await this.loadLog(row);
         } else {
@@ -172,11 +170,6 @@ export class TaskView {
     this.viewport.resume();
     this.logIndex = new LogLineIndex();
     this.error = undefined;
-    void markReviewed(row).catch((error) => {
-      if (this.details !== id || this.closed) return;
-      this.error = String(error);
-      this.tui.requestRender();
-    });
     void this.loadLog(row);
   }
 
@@ -387,8 +380,7 @@ export class TaskView {
       if (next !== group) lines.push(this.theme.fg("muted", next));
       group = next;
       const selected = row.job.id === this.selected;
-      const fresh = row.job.finishedAt && !row.reviewed ? " · unreviewed" : "";
-      const line = `${selected ? ">" : " "} ${displayJobId(row.job.id, this.snapshot)} · ${taskStatusLabel(row)} · ${elapsed(row)}${fresh} · ${terminalText(row.job.label || row.job.command)}`;
+      const line = `${selected ? ">" : " "} ${displayJobId(row.job.id, this.snapshot)} · ${taskStatusLabel(row)} · ${elapsed(row)} · ${terminalText(row.job.label || row.job.command)}`;
       lines.push(selected ? this.theme.fg("accent", line) : line);
     }
     if (!rows.length) lines.push("No background tasks in this session.");

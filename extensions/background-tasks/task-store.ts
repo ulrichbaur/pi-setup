@@ -1,17 +1,10 @@
-import {
-  access,
-  type FileHandle,
-  open,
-  readdir,
-  writeFile,
-} from "node:fs/promises";
+import { type FileHandle, open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { inspectJob, isJobId, sessionDir } from "./runner.ts";
 
 export type TaskRow = Awaited<ReturnType<typeof inspectJob>> & {
   dir: string;
-  reviewed: boolean;
 };
 
 function missing(error: unknown): boolean {
@@ -24,22 +17,6 @@ export function active(row: TaskRow): boolean {
     row.state === "starting" ||
     row.state === "stopping"
   );
-}
-
-async function reviewed(dir: string): Promise<boolean> {
-  try {
-    await access(join(dir, "reviewed"));
-    return true;
-  } catch (error) {
-    if (missing(error)) return false;
-    throw error;
-  }
-}
-
-export async function markReviewed(row: TaskRow): Promise<void> {
-  if (!row.job.finishedAt || row.reviewed) return;
-  await writeFile(join(row.dir, "reviewed"), "", { mode: 0o600 });
-  row.reviewed = true;
 }
 
 export async function sessionTasks(
@@ -62,11 +39,7 @@ export async function sessionTasks(
         const dir = join(directory, entry.name);
         try {
           const result = await inspectJob(dir);
-          rows.push({
-            ...result,
-            dir,
-            reviewed: !!result.job.finishedAt && (await reviewed(dir)),
-          });
+          rows.push({ ...result, dir });
         } catch (error) {
           errors.push(`${entry.name}: ${String(error)}`);
         }
