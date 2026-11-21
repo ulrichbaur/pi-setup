@@ -1,3 +1,4 @@
+import { formatCost } from "../../lib/subagent-cost.ts";
 import type { SubagentRun } from "./subagents/runs.ts";
 import { isActive } from "./subagents/runs.ts";
 import { elapsed, taskStatusLabel } from "./tasks/task-detail.ts";
@@ -120,7 +121,10 @@ function taskTone({ state, job }: TaskRow): Tone {
   }
 }
 
-/** The status in words, with the elapsed time once the item has started. */
+/**
+ * The status in words, with the elapsed time once the item has started, and
+ * a subagent's cost once it has one.
+ */
 export function itemStatus(
   item: Item,
   now = Date.now(),
@@ -141,8 +145,11 @@ export function itemStatus(
       : result.progress.status === "running" && startedAt !== undefined
         ? now - startedAt
         : result.progress.durationMs;
+  // A session row sums the cost of the session's runs.
+  const cost =
+    result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : "";
   return {
-    text: time === undefined ? word : `${word} · ${duration(time)}`,
+    text: `${time === undefined ? word : `${word} · ${duration(time)}`}${cost}`,
     tone,
   };
 }

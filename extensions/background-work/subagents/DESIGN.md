@@ -171,7 +171,7 @@
 ## Cost
 
 - Each result header shows the run's cost.
-  Each session's detail header sums the retained runs of its session once,
+  Each session's row and detail header in `/tasks` sum the retained runs of its session once,
   deduplicated by the same result key as cost events.
   Tool counts and durations also sum those retained runs.
   Evicted runs can still appear in the saved transcript but not in row totals.

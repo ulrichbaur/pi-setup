@@ -161,3 +161,19 @@ test("stopped and interrupted subagents read as neither success nor failure", ()
     tone: "muted",
   });
 });
+
+test("a subagent row shows its session's cost once it has one", () => {
+  const run = fakeRun("scout-00000021", "completed");
+  run.result.progress.durationMs = 32_000;
+  run.result.usage.cost = 0.042;
+  const [item] = buildSections(undefined, [run]).subagentHistory;
+  assert.deepEqual(itemStatus(item), {
+    text: "Completed · 32s · $0.042",
+    tone: "success",
+  });
+  run.result.usage.cost = 0.0031;
+  assert.equal(itemStatus(item).text, "Completed · 32s · $0.0031");
+  // Queued runs have no time yet, but a continued session has a cost.
+  run.result.progress.status = "pending";
+  assert.equal(itemStatus(item).text, "Queued · $0.0031");
+});

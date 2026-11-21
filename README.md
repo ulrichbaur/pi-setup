@@ -208,6 +208,7 @@ Quitting Pi stops it without asking, because Pi offers no hook before quitting.
 Open `/tasks` with **Alt+T**. It lists shell jobs and subagents together:
 active work of both kinds first, then shell history, then subagent history.
 Each row shows the kind, the ID, the status with the elapsed time, and the title.
+A subagent row adds its session's cost once there is one.
 A subagent has one row per session, even while it runs, and continuing after `ask_parent` updates the same row.
 Press Enter for details, `x` to stop the selected job or subagent, and Escape to go back or close.
 Use `/tasks <id>` to open a job or subagent session directly. Completions name each entry's kind.
@@ -307,7 +308,7 @@ The run's cost so far comes from its saved subagent session, so it still counts 
 The message that was streaming when Pi closed may lack its final usage, so that cost can be slightly low.
 
 Each tool result shows its run's cost.
-Each subagent's detail header sums its retained runs once.
+Each subagent's row and detail header sum its retained runs once.
 The registry retains every active run and the 50 newest finished runs.
 Session grouping does not change the overall cost total.
 
