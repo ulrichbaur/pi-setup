@@ -1,8 +1,6 @@
-import { join } from "node:path";
-import {
-  type ExtensionAPI,
-  type ExtensionContext,
-  getAgentDir,
+import type {
+  ExtensionAPI,
+  ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
   buildSections,
@@ -16,7 +14,6 @@ import {
   type SubagentsHandle,
 } from "./subagents/register.ts";
 import { sessionRows } from "./subagents/session-view.ts";
-import { loadShortcut } from "./tasks/config.ts";
 import { registerTasks, type TasksHandle } from "./tasks/register.ts";
 import { sessionTasks, terminalText } from "./tasks/task-store.ts";
 import { BackgroundView, type ViewSources } from "./view.ts";
@@ -156,22 +153,8 @@ export default async function backgroundWork(pi: ExtensionAPI): Promise<void> {
     handler: openView,
   });
 
-  try {
-    const shortcut = await loadShortcut(
-      join(getAgentDir(), "background-tasks.json"),
-    );
-    if (shortcut) {
-      pi.registerShortcut(shortcut, {
-        description: "Open background jobs and subagents for this session",
-        handler: (ctx) => openView("", ctx),
-      });
-    }
-  } catch (error) {
-    pi.on("session_start", (_event, ctx) => {
-      ctx.ui.notify(
-        `Background work shortcut not loaded: ${terminalText(String(error))}`,
-        "error",
-      );
-    });
-  }
+  pi.registerShortcut("alt+t", {
+    description: "Open background jobs and subagents for this session",
+    handler: (ctx) => openView("", ctx),
+  });
 }

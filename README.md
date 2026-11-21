@@ -215,9 +215,6 @@ RPC, print, and JSON modes save results without waking the agent.
 Notice delivery is best effort. If Pi exits before it delivers a completion notice, the notice is lost.
 The result and log remain available in `/tasks`.
 
-To change the shortcut, put `{"shortcut":"alt+shift+t"}` in `background-tasks.json` in Pi’s agent directory.
-Use `{"shortcut":false}` to disable the shortcut without disabling `/tasks`. Run `/reload` after editing.
-
 ### Subagents
 
 `extensions/background-work/subagents/` adds the `subagent` tool with single and parallel modes.
@@ -298,6 +295,7 @@ Malformed config and unknown agent names fail at load with the config path.
 Migration: rename `agents.worker` to `agents.analyst` and remove other custom-agent config entries.
 Custom agent files no longer load, and `/agents`, `/agents open`, `/agents back`, and Ctrl+O session switching are removed.
 Use `/tasks` instead of `/agents`.
+The `/tasks` shortcut is fixed to **Alt+T**, and `background-tasks.json` is no longer read.
 No user config, agent files, or saved state are rewritten.
 Historical results and transcripts remain readable, including old editing and shell calls.
 Old worker or custom-agent sessions cannot continue because their definitions no longer exist.
