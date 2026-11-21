@@ -49,11 +49,15 @@ export class JobRegistry {
       // A failed spawn rejects below; any later failure ends in the exit event.
     });
     worker.on("message", (event: WorkerEvent) => this.onEvent(entry, event));
-    // A worker that exits before Pi records the end failed.
+    // A worker that exits before Pi records the end failed. During a stop,
+    // it never confirmed that the job's processes ended.
     worker.on("exit", (exitCode, signal) => {
+      const how = signal ?? `exit ${exitCode}`;
       this.finish(entry, "failed", {
         ...entry.outcome,
-        error: `The job worker ended unexpectedly (${signal ?? `exit ${exitCode}`})`,
+        error: entry.stopReason
+          ? `The job worker ended while stopping the job (${how}). Some of its processes may still run.`
+          : `The job worker ended unexpectedly (${how})`,
       });
     });
     try {

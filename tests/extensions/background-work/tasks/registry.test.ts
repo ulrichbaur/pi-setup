@@ -319,3 +319,25 @@ test(
     });
   },
 );
+
+test(
+  "a worker that dies during a stop says the job may still run",
+  options,
+  async () => {
+    await withTempDir("pi-bg-registry-", async (root) => {
+      const registry = new JobRegistry();
+      // The job ignores SIGTERM, so the stop waits, and it ends by itself.
+      const dir = await running(registry, root, "trap '' TERM; sleep 2");
+      const { id, workerPid } = readJob(dir);
+      assert.equal(registry.stop(id), true);
+      process.kill(workerPid as number, "SIGKILL");
+      const job = await registry.waitForEnd(id, 8_000);
+      assert.equal(job?.state, "failed");
+      assert.match(
+        job?.error ?? "",
+        /ended while stopping the job \(SIGKILL\)/,
+      );
+      assert.match(job?.error ?? "", /Some of its processes may still run\./);
+    });
+  },
+);
