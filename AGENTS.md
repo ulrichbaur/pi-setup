@@ -7,6 +7,8 @@ This repository is an installable Pi package containing personal Pi resources.
 - put executable Pi extensions in `extensions/`.
 - put code shared by more than one extension in `lib/`.
   Extensions never import from each other.
+- give each feature of a multi-feature extension its own folder.
+  Features never import from each other; only the extension's top-level modules combine them.
 - put tests in `tests/`, mirroring the path of the module under test:
   `extensions/foo/bar.ts` is tested by `tests/extensions/foo/bar.test.ts`.
 - put end-to-end tests that drive the Pi TUI in `tests/tui/`, named `*.tui.ts`,

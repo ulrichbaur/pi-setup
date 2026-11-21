@@ -180,9 +180,46 @@ It contacts only the requested URL, and there is no third-party reader to fall b
 A page that needs JavaScript to render therefore fails with an explicit error.
 Responses and the output the model sees have explicit size limits.
 
-### Background tasks
+### Background work
 
-`task_start` runs a shell command in the background and returns its log path.
+`extensions/background-work/` runs shell commands and subagents in the background.
+Its two features load separately.
+If one fails to load, a notice says why, and the other keeps working.
+
+|                    | Shell job                             | Subagent                             |
+| ------------------ | ------------------------------------- | ------------------------------------ |
+| Start              | `task_start`                          | `subagent` with `background: true`   |
+| Check              | `task_status`                         | `subagent_status`                    |
+| Stop               | `task_stop`                           | `subagent_stop`                      |
+| Default time limit | 30 minutes                            | 30 minutes, for background runs only |
+| Result arrives as  | a notice                              | a message                            |
+| When Pi closes     | stops, shown as interrupted on resume | stops, reported on resume            |
+| Config             | none                                  | `subagents.json`                     |
+
+#### The `/tasks` view
+
+Open `/tasks` with **Alt+T**. It lists shell jobs and subagents together:
+active work of both kinds first, then shell history, then subagent history.
+Each row shows the kind, the ID, the status with the elapsed time, and the title.
+A subagent has one row per session, even while it runs, and continuing after `ask_parent` updates the same row.
+Press Enter for details, `x` to stop the selected job or subagent, and Escape to go back or close.
+Use `/tasks <id>` to open a job or subagent session directly. Completions name each entry's kind.
+Job IDs show as a five-character prefix, extended when needed to be unique in the session.
+
+A shell job's details show its command and log.
+Press `c` for the full command, `w` to wrap lines, `/` or `?` to search, and End to follow new output.
+A subagent's details show its continuous conversation, including earlier questions and parent answers.
+History stays visible during streaming and after completion or reload, and PgUp/PgDn scroll it.
+Unreadable history or a session file over 10 MiB shows a warning instead of a transcript.
+There is no live steering or queued follow-up input.
+Continue a session through the parent model's `subagent` call instead.
+
+The footer counts running jobs after a `Tasks:` label,
+and running or queued background subagents after a `Subagents:` label.
+
+#### Shell jobs
+
+`task_start` runs a shell command in the background and returns its job ID and log path.
 A job runs as long as Pi does. Quitting Pi, `/reload`, or switching sessions stops it.
 If Pi crashes, the job's own worker process stops it.
 Finished jobs and their logs stay in the session's history.
@@ -201,13 +238,6 @@ Pi marks the task finished when its shell exits. If the shell leaves a child run
 Pi can no longer stop it from `/tasks` or enforce the task timeout.
 If your script intentionally starts parallel workers with `&`, use `wait` to keep the shell alive until they finish.
 
-Open `/tasks` with **Alt+T**. It lists shell jobs and subagents together:
-active work of both kinds first, then shell history, then subagent history.
-Press Enter for details, `x` to stop the selected job or subagent, and Escape to go back or close.
-Use `/tasks <id>` to open a job or subagent session directly. Completions name each entry's kind.
-The view and notices show a five-character job ID prefix, extended when needed to be unique in the session.
-The footer counts running jobs after a `Tasks:` label.
-
 In the terminal UI, a job completion reaches an active agent before its next model call or wakes an idle agent.
 Requested stops, and jobs interrupted when Pi closed, show a notice without starting a turn.
 RPC, print, and JSON modes save results without waking the agent.
@@ -215,10 +245,10 @@ RPC, print, and JSON modes save results without waking the agent.
 Notice delivery is best effort. If Pi exits before it delivers a completion notice, the notice is lost.
 The result and log remain available in `/tasks`.
 
-### Subagents
+#### Subagents
 
-`extensions/background-work/subagents/` adds the `subagent` tool with single and parallel modes.
-It provides scout, researcher, and analyst agents in isolated Pi processes.
+The `subagent` tool runs scout, researcher, and analyst agents in isolated Pi processes,
+in single or parallel mode.
 Only these built-in agents load.
 User `agents/` and project `.pi/agents/` files are ignored, including overrides.
 
@@ -234,7 +264,7 @@ An agent that needs an answer calls `ask_parent`, and its run ends with the ques
 The parent model answers by continuing the subagent's session,
 and it asks you only when it cannot answer itself.
 
-The extension depends on the web-fetch and web-search extensions.
+Subagents depend on the web-fetch and web-search extensions.
 A missing tool extension or unsupported tool fails at load with the agent file path.
 
 Each run saves its session in `subagents/sessions/` below the agent directory,
@@ -253,7 +283,6 @@ That tool waits up to 10 seconds for the run to end.
 Both tools also accept `session` instead of `runId`.
 A session selects its active run, or else its newest run.
 A run stopped by the user or by `subagent_stop` delivers its result without starting a new turn.
-The status line shows how many background subagents are running or queued.
 
 Background runs default to a 30-minute runtime limit, starting when a run gets a slot.
 Set `timeoutMs` at launch, or override it per entry in `tasks`. Use `0` to disable the limit.
@@ -264,14 +293,6 @@ Background runs stop when the session closes, and their sessions stay saved.
 When the session is opened again, one message lists the interrupted runs without starting a turn.
 For each run, it says how to continue the subagent session, or to launch the run again if no session was saved.
 
-`/tasks` shows one row per subagent session, even while it runs.
-Continuing after `ask_parent` updates the same row.
-Press Enter to inspect its continuous conversation, including earlier questions and parent answers.
-History stays visible during streaming and after completion or reload.
-PgUp/PgDn scroll, `x` stops that session's active run, and Escape returns to the list.
-Unreadable history or a session file over 10 MiB shows a warning instead of a transcript.
-There is no live steering or queued follow-up input.
-Continue a session through the parent model's `subagent` call instead.
 Each tool result shows its run's cost.
 Each subagent's detail header sums its retained runs once.
 The registry retains every active run and the 50 newest finished runs.
