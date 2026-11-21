@@ -166,11 +166,23 @@ test("a job stops with Pi, ends as interrupted, and keeps its log for a resume",
   });
 });
 
-test("a job end during shutdown reaches neither the closed pi nor its ctx", {
-  skip: process.platform === "win32",
-  timeout: 20_000,
-}, async () => {
-  await withTempDir("pi-background-close-", async (root) => {
+/**
+ * Registers the task feature with a fake Pi in the given mode and starts its
+ * session. Once `close` runs, the fake throws like a closed Pi runtime.
+ */
+async function withFeature(
+  mode: string,
+  run: (feature: {
+    root: string;
+    sessionId: string;
+    registry: Awaited<ReturnType<typeof registerTasks>>["registry"];
+    jobs: () => string;
+    handlers: Record<string, (event: unknown, ctx?: unknown) => void>;
+    sent: Array<[unknown, unknown]>;
+    close: () => void;
+  }) => Promise<void>,
+): Promise<void> {
+  await withTempDir("pi-background-feature-", async (root) => {
     const previous = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = root;
     try {
@@ -180,7 +192,7 @@ test("a job end during shutdown reaches neither the closed pi nor its ctx", {
       };
       const handlers: Record<string, (event: unknown, ctx?: unknown) => void> =
         {};
-      const sent: unknown[] = [];
+      const sent: Array<[unknown, unknown]> = [];
       const pi = {
         registerTool: () => {},
         on: (
@@ -189,9 +201,9 @@ test("a job end during shutdown reaches neither the closed pi nor its ctx", {
         ) => {
           handlers[event] = handler;
         },
-        sendMessage: (message: unknown) => {
+        sendMessage: (message: unknown, options: unknown) => {
           stale();
-          sent.push(message);
+          sent.push([message, options]);
         },
       } as unknown as ExtensionAPI;
       const { registry, root: jobs } = await registerTasks(pi);
@@ -199,16 +211,82 @@ test("a job end during shutdown reaches neither the closed pi nor its ctx", {
       handlers.session_start(
         {},
         {
-          mode: "tui",
+          mode,
           sessionManager: { getSessionId: () => sessionId },
           ui: { notify: stale, setStatus: () => {} },
         },
       );
-      // The notice starts its read; then the session shuts down.
-      registry.onEnd(() => {
-        handlers.session_shutdown({ reason: "quit" });
-        closed = true;
+      await run({
+        root,
+        sessionId,
+        registry,
+        jobs,
+        handlers,
+        sent,
+        close: () => {
+          closed = true;
+        },
       });
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
+    }
+  });
+}
+
+const unix = { skip: process.platform === "win32", timeout: 20_000 };
+
+test(
+  "a job end during shutdown reaches neither the closed pi nor its ctx",
+  unix,
+  async () => {
+    await withFeature(
+      "tui",
+      async ({ root, sessionId, registry, jobs, handlers, sent, close }) => {
+        // The notice starts its read; then the session shuts down.
+        registry.onEnd(() => {
+          handlers.session_shutdown({ reason: "quit" });
+          close();
+        });
+        const { dir } = await registry.start(jobs(), sessionId, {
+          cwd: root,
+          command: "exit 0",
+        });
+        await until(() => readJob(dir).finishedAt !== undefined);
+        await delay(200);
+        assert.deepEqual(sent, []);
+      },
+    );
+  },
+);
+
+test(
+  "in RPC mode, a job end is announced and starts a turn",
+  unix,
+  async () => {
+    await withFeature(
+      "rpc",
+      async ({ root, sessionId, registry, jobs, sent }) => {
+        await registry.start(jobs(), sessionId, {
+          cwd: root,
+          command: "exit 0",
+        });
+        await until(() => sent.length === 1);
+        const [[message, options]] = sent;
+        assert.match(
+          String((message as { content: string }).content),
+          /completed · exit 0\./,
+        );
+        assert.deepEqual(options, { deliverAs: "steer", triggerTurn: true });
+      },
+    );
+  },
+);
+
+test("in print mode, a job end is not announced", unix, async () => {
+  await withFeature(
+    "print",
+    async ({ root, sessionId, registry, jobs, sent }) => {
       const { dir } = await registry.start(jobs(), sessionId, {
         cwd: root,
         command: "exit 0",
@@ -216,9 +294,6 @@ test("a job end during shutdown reaches neither the closed pi nor its ctx", {
       await until(() => readJob(dir).finishedAt !== undefined);
       await delay(200);
       assert.deepEqual(sent, []);
-    } finally {
-      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = previous;
-    }
-  });
+    },
+  );
 });

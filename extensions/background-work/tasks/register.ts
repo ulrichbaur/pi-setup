@@ -194,8 +194,7 @@ export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
     disposers = [];
     const sessionId = ctx.sessionManager.getSessionId();
     const root = storageRoot();
-    // Any session's jobs are owned by this process, so only a TUI session
-    // announces what ends, and only its own jobs.
+    // Each session announces only its own jobs.
     let own: string;
     try {
       own = `${sessionDir(root, sessionId)}${sep}`;
@@ -206,8 +205,11 @@ export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
       );
       return;
     }
-    if (ctx.mode === "tui") {
-      disposers.push(watchTaskFooter(ctx.ui, registry));
+    // Pi stays open in the terminal and in RPC mode, so job ends are
+    // announced there. Print and JSON mode exit after the answer.
+    const announces = ctx.mode === "tui" || ctx.mode === "rpc";
+    if (ctx.mode === "tui") disposers.push(watchTaskFooter(ctx.ui, registry));
+    if (announces) {
       disposers.push(
         registry.onEnd((job: Job, dir: string) => {
           if (!dir.startsWith(own)) return;
@@ -233,7 +235,7 @@ export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
             `Background task record unavailable: ${terminalText(error)}`,
             "warning",
           );
-        if (ctx.mode !== "tui" || !rows.length) return;
+        if (!announces || !rows.length) return;
         await announce(rows, sessionId, false);
         for (const row of rows) markNoticeSent(row);
       })

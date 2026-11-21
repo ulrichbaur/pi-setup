@@ -71,7 +71,7 @@ The subagent design is in `subagents/DESIGN.md`.
 
 ## Notices
 
-- A job's end sends a notice at once, in the terminal UI only.
+- A job's end sends a notice at once, in the terminal and in RPC mode.
   A requested stop and an interruption do not start a turn; other ends do.
 - Delivery is best effort.
   A notice lost when Pi exits is not sent again.

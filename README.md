@@ -246,9 +246,9 @@ Pi marks the task finished when its shell exits. If the shell leaves a child run
 Pi can no longer stop it from `/tasks` or enforce the task timeout.
 If your script intentionally starts parallel workers with `&`, use `wait` to keep the shell alive until they finish.
 
-In the terminal UI, a job completion reaches an active agent before its next model call or wakes an idle agent.
+In the terminal and in RPC mode, a job completion reaches an active agent before its next model call or wakes an idle agent.
 Requested stops, and jobs interrupted when Pi closed, show a notice without starting a turn.
-RPC, print, and JSON modes save results without waking the agent.
+Print and JSON modes save results without waking the agent.
 
 Notice delivery is best effort. If Pi exits before it delivers a completion notice, the notice is lost.
 The result and log remain available in `/tasks`.
