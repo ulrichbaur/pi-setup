@@ -199,7 +199,7 @@ If your script intentionally starts parallel workers with `&`, use `wait` to kee
 
 Open `/tasks` with **Alt+T**. Press Enter for output and `x` to stop a running job.
 Use `/tasks <id>` to open a job directly. The popup and notices show a five-character ID prefix, extended when needed to be unique in the session.
-The footer counts running jobs and unreviewed results. Open a finished job to mark it reviewed.
+The footer counts running jobs and unreviewed results after a `Tasks:` label. Open a finished job to mark it reviewed.
 
 In the terminal UI, a job completion reaches an active agent before its next model call or wakes an idle agent.
 Manual stops and completions missed while Pi was closed show a notice without starting a turn.

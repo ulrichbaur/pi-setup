@@ -153,7 +153,7 @@ test("/tasks manages jobs and announces results without interrupting tools", {
         sessionFile,
       );
       await screen(/Details: \/tasks 00112\s*$/m);
-      await screen(/1 running · 1 unreviewed \(1 failed\)/);
+      await screen(/Tasks: 1 running · 1 unreviewed \(1 failed\)/);
       assert.equal(modelCalls, 0);
       tmux("send-keys", "-t", "tasks", "-l", "Unsubmitted draft");
       press("M-t");

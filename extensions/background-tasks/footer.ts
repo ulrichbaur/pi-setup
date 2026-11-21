@@ -30,6 +30,20 @@ export function taskSummary(rows: TaskRow[]): string | undefined {
   return parts.length ? parts.join(" · ") : undefined;
 }
 
+/** The footer status, or undefined when there is nothing to show. */
+export function footerText(
+  rows: TaskRow[],
+  errors: string[],
+  noticesOk: boolean,
+): string | undefined {
+  const parts = [
+    taskSummary(rows),
+    errors.length ? "some unavailable" : undefined,
+    noticesOk ? undefined : "notices unavailable",
+  ].filter(Boolean);
+  return parts.length ? `Tasks: ${parts.join(" · ")}` : undefined;
+}
+
 export function watchTaskFooter(
   ctx: ExtensionContext,
   root: string,
@@ -47,17 +61,9 @@ export function watchTaskFooter(
     try {
       const { rows, errors } = await sessionTasks(root, sessionId);
       if (closed) return;
-      const noticesOk = publishNotices(rows, errors);
-      text =
-        [
-          taskSummary(rows),
-          errors.length ? "some tasks unavailable" : undefined,
-          noticesOk ? undefined : "some notices unavailable",
-        ]
-          .filter(Boolean)
-          .join(" · ") || undefined;
+      text = footerText(rows, errors, publishNotices(rows, errors));
     } catch {
-      text = "tasks unavailable";
+      text = "Tasks: unavailable";
     } finally {
       updating = false;
     }
