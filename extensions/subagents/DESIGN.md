@@ -150,6 +150,8 @@
 - A background run gets a 30-minute timeout when it takes a concurrency slot.
   A launch can override `timeoutMs` for all tasks or for an individual task; `0` disables it.
   A timeout stops the child and uses the same delivery path as other results.
+  Its output joins the last finished message and the streaming one, both read when the timer fires.
+  Pi's abort ends the streaming message with the same text, so a later read would repeat it.
   Once the child reports settlement, the timer no longer applies to cleanup.
 - A session shutdown stops the background runs
   and cancels their delivery, so a late result never reaches another session.

@@ -1,10 +1,20 @@
 // A stand-in for `pi --mode rpc`. The mode selects the behavior:
 // "complete" finishes each prompt, "crash" exits during a prompt,
 // "hang" waits until it receives an abort command, and "linger" keeps
-// running after stdin closes. "partial" streams text and waits for abort.
+// running after stdin closes. "partial" streams text and waits for abort;
+// "partial-after-message" first finishes one message. On abort, both end
+// the streaming message with its text, as Pi does.
 import { createLineSplitter } from "../../../extensions/subagents/rpc.ts";
 
-const MODES = ["complete", "crash", "hang", "linger", "partial"];
+const MODES = [
+  "complete",
+  "crash",
+  "hang",
+  "linger",
+  "partial",
+  "partial-after-message",
+];
+const STREAMED = "unfinished answer";
 
 // Tests that start the fake pass the mode as the first argument. The
 // extension starts it like Pi, with Pi's arguments; then FAKE_PI_MODE
@@ -36,6 +46,16 @@ const splitter = createLineSplitter((line) => {
     return;
   }
   if (record.type === "abort") {
+    if (mode.startsWith("partial")) {
+      send({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: STREAMED }],
+          stopReason: "aborted",
+        },
+      });
+    }
     send({ id: record.id, type: "response", command: "abort", success: true });
     send({ type: "agent_settled" });
     return;
@@ -53,11 +73,17 @@ const splitter = createLineSplitter((line) => {
     data: { disposition: "started" },
   });
   if (mode === "hang") return;
-  if (mode === "partial") {
+  if (mode.startsWith("partial")) {
+    if (mode === "partial-after-message") {
+      send({
+        type: "message_end",
+        message: { role: "assistant", content: "first finding" },
+      });
+    }
     send({ type: "message_start", message: { role: "assistant" } });
     for (const update of [
       { type: "text_start" },
-      { type: "text_delta", delta: "unfinished answer" },
+      { type: "text_delta", delta: STREAMED },
     ]) {
       send({
         type: "message_update",

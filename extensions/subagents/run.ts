@@ -388,11 +388,15 @@ async function runAgent(
   run.startedAt = startedAt;
   if (result.runId) onUpdate?.(result);
 
-  let partial = "";
+  // Snapshots at the timeout: Pi's abort later ends the streaming message
+  // with the same text, which would otherwise appear twice.
+  let completed = "";
+  let unfinished = "";
   const timer =
     timeoutMs > 0
       ? setTimeout(() => {
-          partial = contentText(result.live?.streaming?.content);
+          completed = result.output;
+          unfinished = contentText(result.live?.streaming?.content);
           run.stop.abort(new RunTimeout(timeoutMs));
         }, timeoutMs).unref()
       : undefined;
@@ -501,7 +505,12 @@ async function runAgent(
   result.progress.durationMs = Date.now() - startedAt;
   if (run.stop.signal.reason instanceof RunTimeout) {
     result.progress.status = "timed_out";
-    result.output = partial || result.output;
+    result.output = [
+      completed,
+      unfinished && `Unfinished message:\n${unfinished}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     result.question = undefined;
   } else {
     result.progress.status = finalStatus(

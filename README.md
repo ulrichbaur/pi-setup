@@ -255,6 +255,7 @@ The status line shows how many background subagents are running or queued.
 Background runs default to a 30-minute runtime limit, starting when a run gets a slot.
 Set `timeoutMs` at launch, or override it per entry in `tasks`. Use `0` to disable the limit.
 On timeout, the run stops and reports `timed_out` with any captured partial output.
+That output holds the last finished message, then the message that was still streaming, labeled "Unfinished message".
 Foreground runs do not accept `timeoutMs`.
 Background runs stop when the session closes, and their sessions stay saved.
 When the session is opened again, one message lists the interrupted runs without starting a turn.

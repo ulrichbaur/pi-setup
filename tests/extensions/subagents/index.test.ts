@@ -448,13 +448,39 @@ test("a timeout delivers captured streaming text as partial output", {
     await arrived;
     assert.match(
       String(sent[0].message.content),
-      /Timed out: [^\n]+\n\nPartial output:\nunfinished answer/,
+      /Timed out: [^\n]+\n\nPartial output:\nUnfinished message:\nunfinished answer\n/,
     );
     assert.deepEqual(sent[0].options, {
       triggerTurn: true,
       deliverAs: "steer",
     });
     assert.equal(sent.length, 1);
+  } finally {
+    delete process.env.FAKE_PI_MODE;
+  }
+});
+
+test("a timeout keeps the last finished message before the unfinished one", {
+  timeout: 8_000,
+}, async () => {
+  process.env.FAKE_PI_MODE = "partial-after-message";
+  const { run, arrived, sent } = load();
+  try {
+    await run({
+      agent: "scout",
+      task: "write slowly",
+      background: true,
+      timeoutMs: 600,
+    });
+    await arrived;
+    const content = String(sent[0].message.content);
+    assert.match(
+      content,
+      /Partial output:\nfirst finding\n\nUnfinished message:\nunfinished answer\n/,
+    );
+    assert.equal(content.split("unfinished answer").length, 2);
+    const [result] = (sent[0].message.details as SubagentDetails).results;
+    assert.equal(result.progress.status, "timed_out");
   } finally {
     delete process.env.FAKE_PI_MODE;
   }
