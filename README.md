@@ -246,10 +246,10 @@ Each run sends its own completion message, even when launched in parallel.
 The message reaches a busy parent before its next model call, or starts a new turn if the parent is idle.
 The parent can call `subagent_status` to list retained background runs or pass `runId` to inspect one without waiting.
 It can call `subagent_stop` with a `runId` to stop a queued or running background run.
+That tool waits up to 10 seconds for the run to end.
 Both tools also accept `session` instead of `runId`.
 A session selects its active run, or else its newest run.
-The tool waits up to 10 seconds for the run to end.
-The run's result message still arrives, but it does not start a new turn.
+A run stopped by the user or by `subagent_stop` delivers its result without starting a new turn.
 The status line shows how many background subagents are running or queued.
 
 Background runs default to a 30-minute runtime limit, starting when a run gets a slot.

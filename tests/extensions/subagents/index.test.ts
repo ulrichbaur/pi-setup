@@ -344,7 +344,7 @@ test("the parent stops queued and running background runs without a new turn", {
   }
 });
 
-test("a user stop still starts a turn", async () => {
+test("a user stop delivers the result without starting a turn", async () => {
   process.env.FAKE_PI_MODE = "hang";
   const { run, registry, sent } = load();
   try {
@@ -354,9 +354,11 @@ test("a user stop still starts a turn", async () => {
     registry.stop(live);
     await until(() => sent.length === 1);
     assert.deepEqual(sent[0].options, {
-      triggerTurn: true,
+      triggerTurn: false,
       deliverAs: "steer",
     });
+    const [result] = (sent[0].message.details as SubagentDetails).results;
+    assert.equal(result.progress.error, "Stopped by the user");
   } finally {
     delete process.env.FAKE_PI_MODE;
   }
@@ -448,6 +450,10 @@ test("a timeout delivers captured streaming text as partial output", {
       String(sent[0].message.content),
       /Timed out: [^\n]+\n\nPartial output:\nunfinished answer/,
     );
+    assert.deepEqual(sent[0].options, {
+      triggerTurn: true,
+      deliverAs: "steer",
+    });
     assert.equal(sent.length, 1);
   } finally {
     delete process.env.FAKE_PI_MODE;

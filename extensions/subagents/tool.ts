@@ -253,11 +253,12 @@ export function extensionTool(
             () => registry.changed(),
             timeoutMs,
           ).then((result) =>
-            // The parent already learns the outcome from subagent_stop.
+            // A stopped run does not wake the parent: the user chose to
+            // stop it, or subagent_stop already reported the outcome.
             delivery.deliver(
               token,
               { mode: "single", results: [result] },
-              { triggerTurn: stoppedBy(run) !== "parent" },
+              { triggerTurn: stoppedBy(run) === undefined },
             ),
           );
           const { agent, task, sessionId, runId } = run.result;
