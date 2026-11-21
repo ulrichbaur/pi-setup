@@ -13,6 +13,7 @@ import {
   renderDetails,
   type Theme,
 } from "./render.ts";
+import { validResults } from "./restore.ts";
 import {
   type ParentUI,
   pendingResult,
@@ -331,10 +332,12 @@ export function extensionTool(
       theme: Theme,
       context: { invalidate: () => void },
     ) {
-      const details = result.details as SubagentDetails | undefined;
-      if (!details?.results.length) {
+      // Saved details may come from an older version of this extension.
+      const results = validResults(result.details);
+      if (!results.length) {
         return new Text(result.content[0]?.text ?? "(no output)", 0, 0);
       }
+      const details = { ...(result.details as SubagentDetails), results };
       return renderDetails(details, options.expanded, theme, {
         invalidate: context.invalidate,
         hideThinking: hideThinking(),

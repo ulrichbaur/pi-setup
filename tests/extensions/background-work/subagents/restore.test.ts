@@ -209,3 +209,23 @@ test("an interrupted run's cost comes from its own messages in the session file"
     assert.equal(cut.messageEnd, 4);
   });
 });
+
+test("saved results without a session ID are skipped", () => {
+  const old = { ...result("scout-00000001", "completed") };
+  delete (old as Partial<typeof old>).sessionId;
+  const runs = savedRuns(
+    [
+      toolResult("subagent", { results: [old] }),
+      {
+        type: "custom_message",
+        customType: TYPE,
+        details: { results: [old, result("scout-00000002", "completed")] },
+      },
+    ],
+    TYPE,
+  );
+  assert.deepEqual(
+    runs.map((run) => run.result.sessionId),
+    ["scout-00000002"],
+  );
+});

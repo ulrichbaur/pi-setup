@@ -8,7 +8,12 @@ import { loadAgents } from "./agents.ts";
 import { loadConfig } from "./config.ts";
 import { Limiter } from "./limiter.ts";
 import { combinedText, renderDetails } from "./render.ts";
-import { interruptedResults, resultKey, savedRuns } from "./restore.ts";
+import {
+  interruptedResults,
+  resultKey,
+  savedRuns,
+  validResults,
+} from "./restore.ts";
 import { isActive, RunRegistry, type SubagentRun } from "./runs.ts";
 import { findSession, pruneSessions } from "./sessions.ts";
 import { statusTool, watchSubagentStatus } from "./status.ts";
@@ -83,12 +88,19 @@ export function registerSubagents(
           0,
         ),
       );
-      if (message.details?.results.length) {
+      // Saved details may come from an older version of this extension.
+      const results = validResults(message.details);
+      if (message.details && results.length) {
         container.addChild(
-          renderDetails(message.details, options.expanded, theme, {
-            invalidate: () => {},
-            hideThinking: hideThinking(),
-          }),
+          renderDetails(
+            { ...message.details, results },
+            options.expanded,
+            theme,
+            {
+              invalidate: () => {},
+              hideThinking: hideThinking(),
+            },
+          ),
         );
       }
       return container;

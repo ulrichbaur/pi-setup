@@ -9,6 +9,8 @@ import {
   type Snapshot,
   sectionItems,
 } from "../../../extensions/background-work/rows.ts";
+import { savedRuns } from "../../../extensions/background-work/subagents/restore.ts";
+import { sessionRows } from "../../../extensions/background-work/subagents/session-view.ts";
 import type { Job } from "../../../extensions/background-work/tasks/runner.ts";
 import type { TaskRow } from "../../../extensions/background-work/tasks/task-store.ts";
 import { fakeRun } from "./subagents/fake-run.ts";
@@ -176,4 +178,25 @@ test("a subagent row shows its session's cost once it has one", () => {
   // Queued runs have no time yet, but a continued session has a cost.
   run.result.progress.status = "pending";
   assert.equal(itemStatus(item).text, "Queued · $0.0031");
+});
+
+test("an old result without a session ID leaves no row and no error", () => {
+  const old = { ...fakeRun("scout-00000031", "completed").result };
+  delete (old as Partial<typeof old>).sessionId;
+  const runs = savedRuns(
+    [
+      {
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolName: "subagent",
+          details: { results: [old] },
+        },
+      },
+    ],
+    "subagent-result",
+  );
+  const sections = buildSections(undefined, sessionRows(runs));
+  assert.deepEqual(sectionItems(sections), []);
+  assert.deepEqual(completions(sections, "s"), []);
 });

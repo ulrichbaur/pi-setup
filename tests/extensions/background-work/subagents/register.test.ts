@@ -74,6 +74,7 @@ function load() {
       content: Array<{ text: string }>;
       details: SubagentDetails;
     }>;
+    renderResult: (...args: unknown[]) => { render(width: number): string[] };
   };
   let peek: (params: { runId?: string; session?: string }) => Promise<{
     details: Array<{
@@ -171,6 +172,7 @@ function load() {
     registry,
     costs,
     description: () => tool.description,
+    renderResult: (...args: unknown[]) => tool.renderResult(...args),
   };
 }
 
@@ -443,6 +445,25 @@ test("a user stop delivers the result without starting a turn", async () => {
   } finally {
     delete process.env.FAKE_PI_MODE;
   }
+});
+
+test("a saved result without a session ID renders as plain text", () => {
+  const { renderResult } = load();
+  const old = { ...fakeRun("scout-00000001", "completed").result };
+  // Results saved before subagent sessions existed have no session ID.
+  delete (old as Partial<typeof old>).sessionId;
+  const lines = renderResult(
+    {
+      content: [{ type: "text", text: "Old answer" }],
+      details: { mode: "single", results: [old] },
+    },
+    { expanded: false },
+    theme,
+    { invalidate: () => {} },
+  )
+    .render(80)
+    .map((line) => line.trim());
+  assert.deepEqual(lines, ["Old answer"]);
 });
 
 test("a run stopped by a reload never reaches the closed runtime", {

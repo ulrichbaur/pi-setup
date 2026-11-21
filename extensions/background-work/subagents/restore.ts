@@ -6,13 +6,15 @@ import { sessionUsage } from "./usage.ts";
 
 const SUBAGENT_TOOL = "subagent";
 
-function savedResults(details: unknown): AgentResult[] {
+/** The results in saved details that match today's result shape. */
+export function validResults(details: unknown): AgentResult[] {
   if (!isRecord(details) || !Array.isArray(details.results)) return [];
   return details.results.filter(
     (result): result is AgentResult =>
       isRecord(result) &&
       typeof result.agent === "string" &&
       typeof result.task === "string" &&
+      typeof result.sessionId === "string" &&
       isRecord(result.progress),
   );
 }
@@ -111,7 +113,7 @@ export function savedRuns(
     ) {
       const background =
         isRecord(message.details) && message.details.background === true;
-      for (const result of savedResults(message.details)) {
+      for (const result of validResults(message.details)) {
         const id = result.runId;
         const run = {
           ...finishedRun({ ...result }),
@@ -124,7 +126,7 @@ export function savedRuns(
       entry.type === "custom_message" &&
       entry.customType === resultMessageType
     ) {
-      for (const result of savedResults(entry.details)) {
+      for (const result of validResults(entry.details)) {
         const id = result.runId;
         if (id) {
           const placeholder = undelivered.get(id);
