@@ -2,6 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { registerGuards, runningWork } from "./guard.ts";
 import {
   buildSections,
   completions,
@@ -152,6 +153,8 @@ export default async function backgroundWork(pi: ExtensionAPI): Promise<void> {
     },
     handler: openView,
   });
+
+  registerGuards(pi, () => runningWork(tasks, subagents));
 
   pi.registerShortcut("alt+t", {
     description: "Open background jobs and subagents for this session",

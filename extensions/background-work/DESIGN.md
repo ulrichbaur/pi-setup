@@ -43,6 +43,16 @@ The subagent design is in `subagents/DESIGN.md`.
 - Two Pi windows on one session are not supported.
   A later window can mark the other window's running job `interrupted`.
 
+## Guards
+
+- A sent message joins the branch that is current when it is sent,
+  so a result can land on another branch than the one that started the work.
+- `guard.ts` asks before `/tree` moves while shell jobs or background subagents run,
+  and before `/new`, `/resume`, `/fork`, or `/clone` leave the session, which stops them.
+  Answering No cancels the move.
+- Without dialogs, as in print mode, nothing asks.
+  Pi has no hook before `/reload` or quitting.
+
 ## Notices
 
 - A job's end sends a notice at once, in the terminal UI only.

@@ -194,6 +194,17 @@ test("/tasks manages jobs and announces results without interrupting tools", {
       const liveId = started["Live job"];
       assert.ok(liveId);
       assert.equal(modelCalls, 2);
+      // Leaving the session would stop the job, so Pi asks first.
+      command("/new");
+      await screen(/Background work is running/);
+      await screen(
+        /1 shell job is still running\. Leaving this session stops it\./,
+      );
+      press("Escape");
+      await screen(
+        /^(?![\s\S]*Background work is running)[\s\S]*Tasks: 1 running/,
+      );
+      assert.match(await screen(/Live job started/), /Live job started/);
       tmux("send-keys", "-t", "tasks", "-l", "Unsubmitted draft");
       press("M-t");
       // The worker may still be starting the shell when the list opens.

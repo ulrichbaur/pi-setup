@@ -196,6 +196,11 @@ If one fails to load, a notice says why, and the other keeps working.
 | When Pi closes     | stops, shown as interrupted on resume | stops, reported on resume                    |
 | Config             | none                                  | `subagents.json`                             |
 
+A result arrives on the branch that is current when the work ends.
+So while background work runs, `/tree` asks before it moves to another branch.
+`/new`, `/resume`, `/fork`, and `/clone` ask before they leave the session, because leaving stops the work.
+Quitting Pi and `/reload` stop it without asking, because Pi offers no hook before them.
+
 #### The `/tasks` view
 
 Open `/tasks` with **Alt+T**. It lists shell jobs and subagents together:
