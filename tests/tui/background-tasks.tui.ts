@@ -205,6 +205,11 @@ test("/tasks manages jobs and announces results without interrupting tools", {
         /^(?![\s\S]*Background work is running)[\s\S]*Tasks: 1 running/,
       );
       assert.match(await screen(/Live job started/), /Live job started/);
+      // A reload keeps the job; the new runtime takes it over, and the rest
+      // of this test stops it from there.
+      command("/reload");
+      await screen(/Reloaded keybindings, extensions/);
+      await screen(/Tasks: 1 running(?! ·)/);
       tmux("send-keys", "-t", "tasks", "-l", "Unsubmitted draft");
       press("M-t");
       // The worker may still be starting the shell when the list opens.

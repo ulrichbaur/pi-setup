@@ -194,12 +194,14 @@ If one fails to load, a notice says why, and the other keeps working.
 | Default time limit | 30 minutes                            | 30 minutes                                   |
 | Result arrives as  | a notice                              | a message, or the tool result in print mode  |
 | When Pi closes     | stops, shown as interrupted on resume | stops, reported on resume                    |
+| On `/reload`       | keeps running                         | stops, reported after the reload             |
 | Config             | none                                  | `subagents.json`                             |
 
 A result arrives on the branch that is current when the work ends.
 So while background work runs, `/tree` asks before it moves to another branch.
 `/new`, `/resume`, `/fork`, and `/clone` ask before they leave the session, because leaving stops the work.
-Quitting Pi and `/reload` stop it without asking, because Pi offers no hook before them.
+Quitting Pi stops it without asking, because Pi offers no hook before quitting.
+`/reload` keeps shell jobs running and stops subagents, also without asking.
 
 #### The `/tasks` view
 
@@ -225,7 +227,7 @@ and running or queued background subagents after a `Subagents:` label.
 #### Shell jobs
 
 `task_start` runs a shell command in the background and returns its job ID and log path.
-A job runs as long as Pi does. Quitting Pi, `/reload`, or switching sessions stops it.
+A job runs as long as Pi does. Quitting Pi or switching sessions stops it, but `/reload` does not.
 If Pi crashes, the job's own worker process stops it.
 Finished jobs and their logs stay in the session's history.
 A job that Pi's close cut short shows as interrupted when you resume the session.
@@ -298,7 +300,7 @@ Subagent runs default to a 30-minute runtime limit, starting when a run gets a s
 Set `timeoutMs` at launch, or override it per entry in `tasks`. Use `0` to disable the limit.
 On timeout, the run stops and reports `timed_out` with any captured partial output.
 That output holds the last finished message, then the message that was still streaming, labeled "Unfinished message".
-Background runs stop when the session closes, and their sessions stay saved.
+Background runs stop when the session closes, including on `/reload`, and their sessions stay saved.
 When the session is opened again, one message lists the interrupted runs without starting a turn.
 For each run, it says how to continue the subagent session, or to launch the run again if no session was saved.
 The run's cost so far comes from its saved subagent session, so it still counts toward the subagent cost.

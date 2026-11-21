@@ -29,7 +29,14 @@ The subagent design is in `subagents/DESIGN.md`.
 - After a normal exit, Pi releases the worker.
   A child that the shell left running keeps running and is no longer controlled.
 - Jobs end with Pi.
-  Session shutdown stops every job this Pi owns.
+  Session shutdown stops every job this Pi owns, except on a reload.
+- A reload keeps the session, so the jobs keep running.
+  The old runtime puts its `JobRegistry` into a process-wide slot, and the new runtime takes it.
+  The registry refers to no old runtime state, and its listeners are removed at shutdown.
+  The slot carries `REGISTRY_VERSION`.
+  When the version differs, the new runtime stops the old jobs instead of reusing code that may not fit them.
+- Subagents do not survive a reload.
+  Their delivery holds the old runtime's `pi`, which a reload invalidates.
 - When the IPC channel closes before a release, Pi is gone.
   The worker then records the end itself and stops its group.
   A job that was stopping, or still running, becomes `interrupted`.
@@ -52,6 +59,7 @@ The subagent design is in `subagents/DESIGN.md`.
   Answering No cancels the move.
 - Without dialogs, as in print mode, nothing asks.
   Pi has no hook before `/reload` or quitting.
+  A reload keeps shell jobs, so only its subagent stops go unasked.
 
 ## Notices
 

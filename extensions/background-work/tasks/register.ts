@@ -6,7 +6,7 @@ import {
 import { Type } from "typebox";
 import { watchTaskFooter } from "./footer.ts";
 import { sendTaskNotice } from "./notices.ts";
-import { JobRegistry } from "./registry.ts";
+import { handOver, type JobRegistry, takeOver } from "./registry.ts";
 import {
   DEFAULT_TIMEOUT_MS,
   type Job,
@@ -34,7 +34,8 @@ export interface TasksHandle {
 }
 
 export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
-  const registry = new JobRegistry();
+  // A reload hands over the previous runtime's registry with its jobs.
+  const registry = takeOver();
   pi.registerTool({
     name: "task_start",
     label: "Background task",
@@ -226,10 +227,12 @@ export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
         ),
       );
   });
-  pi.on("session_shutdown", () => {
+  pi.on("session_shutdown", (event) => {
     for (const dispose of disposers) dispose();
     disposers = [];
-    registry.stopAll();
+    // A reload keeps the session, so its jobs keep running.
+    if (event?.reason === "reload") handOver(registry);
+    else registry.stopAll();
   });
 
   return { registry, root: storageRoot };

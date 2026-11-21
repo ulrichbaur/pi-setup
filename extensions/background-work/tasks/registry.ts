@@ -182,3 +182,28 @@ export class JobRegistry {
     for (const listener of this.listeners) listener(entry.job, entry.dir);
   }
 }
+
+/**
+ * Raise this when the JobRegistry's methods or fields change. A reload then
+ * stops the old runtime's jobs instead of handing them to code that may not
+ * fit them.
+ */
+export const REGISTRY_VERSION = 1;
+const HANDOVER = Symbol.for("pi-setup/background-work/job-registry");
+type Handover = { version?: number; registry?: Partial<JobRegistry> };
+const slots = globalThis as Record<symbol, Handover | undefined>;
+
+/** Keeps the registry, and its running jobs, for the runtime a reload loads. */
+export function handOver(registry: JobRegistry): void {
+  slots[HANDOVER] = { version: REGISTRY_VERSION, registry };
+}
+
+/** The registry a reload handed over, or a new one. */
+export function takeOver(): JobRegistry {
+  const slot = slots[HANDOVER];
+  delete slots[HANDOVER];
+  if (slot?.registry && slot.version === REGISTRY_VERSION)
+    return slot.registry as JobRegistry;
+  slot?.registry?.stopAll?.();
+  return new JobRegistry();
+}

@@ -81,8 +81,8 @@ export function interruptedResults(
       }
     }
     const hint = path
-      ? `Interrupted: Pi closed the session before this run ended. Its subagent session ${sessionId} is saved. To finish the work, call subagent with that session and a follow-up task.${note}`
-      : "Interrupted: Pi closed the session before this run ended. No subagent session was saved, so it cannot be continued. Launch it again if you still need it.";
+      ? `Interrupted: the session closed before this run ended, by quitting Pi, /reload, or a session switch. Its subagent session ${sessionId} is saved. To finish the work, call subagent with that session and a follow-up task.${note}`
+      : "Interrupted: the session closed before this run ended, by quitting Pi, /reload, or a session switch. No subagent session was saved, so it cannot be continued. Launch it again if you still need it.";
     results.push({
       ...result,
       ...range,

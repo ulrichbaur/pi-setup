@@ -4,7 +4,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { JobRegistry } from "../../../../extensions/background-work/tasks/registry.ts";
+import {
+  handOver,
+  JobRegistry,
+  takeOver,
+} from "../../../../extensions/background-work/tasks/registry.ts";
 import {
   DEFAULT_TIMEOUT_MS,
   readJob,
@@ -181,3 +185,35 @@ test(
     });
   },
 );
+
+test(
+  "a reload hands the registry, with its running jobs, to the next runtime",
+  options,
+  async () => {
+    await withTempDir("pi-bg-registry-", async (root) => {
+      const first = takeOver();
+      const dir = await running(first, root, "sleep 30");
+      handOver(first);
+      const second = takeOver();
+      assert.equal(second, first);
+      assert.equal(readJob(dir).state, "running");
+      // The handover is taken once.
+      assert.notEqual(takeOver(), first);
+      second.stop(readJob(dir).id);
+      assert.equal(
+        (await second.waitForEnd(readJob(dir).id, 8_000))?.state,
+        "stopped",
+      );
+    });
+  },
+);
+
+test("a registry from other code is stopped, not handed over", () => {
+  let stopped = false;
+  (globalThis as Record<symbol, unknown>)[
+    Symbol.for("pi-setup/background-work/job-registry")
+  ] = { version: 0, registry: { stopAll: () => (stopped = true) } };
+  const registry = takeOver();
+  assert.equal(stopped, true);
+  assert.ok(registry instanceof JobRegistry);
+});
