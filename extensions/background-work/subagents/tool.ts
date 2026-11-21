@@ -50,7 +50,7 @@ const TaskSchema = Type.Object({
   ),
   session: Type.Optional(Type.String({ description: SESSION_DESCRIPTION })),
   timeoutMs: timeoutSchema(
-    "Override the background runtime limit for this task. Use 0 to disable it.",
+    "Override the runtime limit for this task. Use 0 to disable it.",
   ),
 });
 
@@ -81,7 +81,7 @@ export function extensionTool(
       "Use subagent tasks for independent parallel delegations.",
       "To continue an earlier subagent with its context, pass its session id and a follow-up task instead of restating the context.",
       "When a subagent result ends with a question, answer it yourself by continuing that subagent with its session id and your answer as the task. Ask the user only when you cannot answer it.",
-      "Set background: true for long work you do not need right away. The tool returns at once, and the result arrives later as a message; continue with other work and do not poll for it.",
+      "In the terminal and in RPC mode, subagents run in the background: the tool returns at once, and each run's result arrives later as a message. Continue with other work and do not poll for it. In print and JSON mode, the tool waits and returns the results.",
       "Each background subagent run sends its own result, even when launched in parallel. Use subagent_status to check a run only when needed.",
       "Use subagent_stop to stop a background run you no longer need.",
     ],
@@ -106,13 +106,7 @@ export function extensionTool(
         Type.String({ description: `${SESSION_DESCRIPTION}, in single mode` }),
       ),
       timeoutMs: timeoutSchema(
-        `Maximum runtime in milliseconds for each background subagent. Defaults to ${DEFAULT_TIMEOUT_MS} (30 minutes). Use 0 to disable it.`,
-      ),
-      background: Type.Optional(
-        Type.Boolean({
-          description:
-            "Return at once and deliver the result later as a message",
-        }),
+        `Maximum runtime in milliseconds for each subagent. Defaults to ${DEFAULT_TIMEOUT_MS} (30 minutes). Use 0 to disable it.`,
       ),
     }),
     async execute(
@@ -123,7 +117,6 @@ export function extensionTool(
         tasks?: TaskRequest[];
         cwd?: string;
         session?: string;
-        background?: boolean;
         timeoutMs?: number;
       },
       signal: AbortSignal | undefined,
@@ -140,10 +133,14 @@ export function extensionTool(
           getAvailable(): Array<{ provider: string; id: string }>;
         };
         thinkingLevel?: string;
+        mode: "tui" | "rpc" | "json" | "print";
         hasUI: boolean;
         ui: ParentUI;
       },
     ) {
+      // The terminal and RPC clients stay open for later messages. Print and
+      // JSON mode exit after the answer, which would stop a background run.
+      const background = ctx.mode === "tui" || ctx.mode === "rpc";
       const hasParallel = Boolean(params.tasks?.length);
       const hasSingle = Boolean(
         params.task && (params.agent || params.session),
@@ -174,8 +171,6 @@ export function extensionTool(
         ...requests.map((request) => request.timeoutMs),
       ]) {
         if (timeoutMs === undefined) continue;
-        if (!params.background)
-          throw new Error("timeoutMs requires background: true");
         if (
           !Number.isInteger(timeoutMs) ||
           timeoutMs < 0 ||
@@ -209,7 +204,7 @@ export function extensionTool(
           plan.agent.name,
           plan.task,
           plan.target.id,
-          params.background ? randomUUID() : undefined,
+          background ? randomUUID() : undefined,
         ),
         stop: new AbortController(),
       }));
@@ -238,20 +233,22 @@ export function extensionTool(
         ui: ctx.hasUI ? ctx.ui : undefined,
       };
 
-      if (params.background) {
+      const timeouts = requests.map(
+        (request) =>
+          request.timeoutMs ?? params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      );
+      if (background) {
         // The runs outlive this tool call, so its signal must not stop them.
-        const background = { ...context, signal: undefined };
+        const detached = { ...context, signal: undefined };
         const started = runs.map((run, index) => {
           const token = delivery.start();
-          const timeoutMs =
-            requests[index].timeoutMs ?? params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
           void runOne(
             plans[index],
             run,
             limiter,
-            background,
+            detached,
             () => registry.changed(),
-            timeoutMs,
+            timeouts[index],
           ).then((result) =>
             // A stopped run does not wake the parent: the user chose to
             // stop it, or subagent_stop already reported the outcome.
@@ -274,7 +271,14 @@ export function extensionTool(
         };
       }
 
-      const results = await runAll(plans, runs, limiter, context, update);
+      const results = await runAll(
+        plans,
+        runs,
+        limiter,
+        context,
+        update,
+        timeouts,
+      );
       const details: SubagentDetails = { mode, results };
       return {
         content: [{ type: "text" as const, text: combinedText(details) }],
@@ -287,19 +291,15 @@ export function extensionTool(
         task?: string;
         tasks?: TaskRequest[];
         session?: string;
-        background?: boolean;
       },
       theme: {
         bold(text: string): string;
         fg(color: "toolTitle" | "accent" | "dim", text: string): string;
       },
     ) {
-      const background = args.background
-        ? ` ${theme.fg("dim", "(background)")}`
-        : "";
       if (args.tasks?.length) {
         return new Text(
-          `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "parallel")} ${theme.fg("dim", `(${args.tasks.length} tasks)`)}${background}`,
+          `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "parallel")} ${theme.fg("dim", `(${args.tasks.length} tasks)`)}`,
           0,
           0,
         );
@@ -310,7 +310,7 @@ export function extensionTool(
         ? ` ${theme.fg("dim", `(continues ${args.session})`)}`
         : "";
       return new Text(
-        `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", agent ?? "")}${resume}${background}`,
+        `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", agent ?? "")}${resume}`,
         0,
         0,
       );

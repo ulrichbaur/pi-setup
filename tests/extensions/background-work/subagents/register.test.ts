@@ -138,8 +138,9 @@ function load() {
     hasUI: false,
     ui: {},
   };
-  const run = (params: Record<string, unknown>) =>
-    tool.execute("call", params, undefined, undefined, ctx);
+  // The terminal runs subagents in the background; print mode waits.
+  const run = (params: Record<string, unknown>, mode = "tui") =>
+    tool.execute("call", params, undefined, undefined, { ...ctx, mode });
   return {
     run,
     peek: (params: { runId?: string; session?: string } = {}) => peek(params),
@@ -172,7 +173,6 @@ test("a background run returns at once and delivers its result later", async () 
   const started = await run({
     agent: "scout",
     task: "look around",
-    background: true,
   });
   assert.equal(started.details.background, true);
   assert.equal(started.details.results[0].progress.status, "pending");
@@ -225,17 +225,60 @@ test("a background run returns at once and delivers its result later", async () 
   assert.equal(sent.length, 1);
 });
 
-test("a foreground run waits for the child and returns its output", async () => {
-  const { run, sent } = load();
-  const result = await run({ agent: "scout", task: "look around" });
+test("print and JSON mode wait for the child and return its output", async () => {
+  for (const mode of ["print", "json"]) {
+    const { run, sent } = load();
+    const result = await run({ agent: "scout", task: "look around" }, mode);
+    assert.equal(result.details.background, undefined, mode);
+    assert.ok(result.content[0].text.startsWith("line same line"), mode);
+    assert.equal(result.details.results[0].runId, undefined, mode);
+    assert.equal(sent.length, 0, mode);
+  }
+});
+
+test("RPC mode runs in the background, like the terminal", async () => {
+  const { run, arrived, sent } = load();
+  const started = await run({ agent: "scout", task: "look around" }, "rpc");
+  assert.equal(started.details.background, true);
+  assert.ok(started.details.results[0].runId);
+  await arrived;
+  assert.equal(sent.length, 1);
+});
+
+test("a leftover background argument does not change the mode", async () => {
+  const { run } = load();
+  const result = await run(
+    { agent: "scout", task: "look around", background: true },
+    "print",
+  );
   assert.equal(result.details.background, undefined);
   assert.ok(result.content[0].text.startsWith("line same line"));
-  assert.equal(sent.length, 0);
+});
+
+test("a timeout in print mode returns the partial output", {
+  timeout: 8_000,
+}, async () => {
+  process.env.FAKE_PI_MODE = "partial";
+  const { run, sent } = load();
+  try {
+    const result = await run(
+      { agent: "scout", task: "write slowly", timeoutMs: 600 },
+      "print",
+    );
+    assert.equal(result.details.results[0].progress.status, "timed_out");
+    assert.match(
+      result.content[0].text,
+      /^Timed out: [^\n]+\n\nPartial output:\nUnfinished message:\nunfinished answer/,
+    );
+    assert.equal(sent.length, 0);
+  } finally {
+    delete process.env.FAKE_PI_MODE;
+  }
 });
 
 test("results of a shut-down session are never delivered", async () => {
   const { run, sent, handlers, registry } = load();
-  await run({ agent: "scout", task: "look around", background: true });
+  await run({ agent: "scout", task: "look around" });
   handlers.session_shutdown();
   await until(() =>
     registry.list().every((run) => run.result.progress.status === "failed"),
@@ -253,7 +296,7 @@ test("background and foreground runs share one concurrency limit", async () => {
   process.env.FAKE_PI_MODE = "hang";
   const { registry, run } = load();
   try {
-    await run({ agent: "scout", task: "first", background: true });
+    await run({ agent: "scout", task: "first" });
     const first = registry.list()[0];
     await until(() => first.result.live !== undefined);
 
@@ -266,7 +309,7 @@ test("background and foreground runs share one concurrency limit", async () => {
         );
       }
     });
-    const foreground = run({ agent: "scout", task: "second" });
+    const foreground = run({ agent: "scout", task: "second" }, "print");
     const second = registry.list()[0];
     await until(() => statuses.length > 0);
     assert.equal(second.result.progress.status, "pending");
@@ -305,7 +348,6 @@ test("the parent stops queued and running background runs without a new turn", {
         { agent: "scout", task: "first" },
         { agent: "scout", task: "second" },
       ],
-      background: true,
     });
     const [first, second] = started.details.results.map(
       (result) => result.runId as string,
@@ -342,7 +384,7 @@ test("a user stop delivers the result without starting a turn", async () => {
   process.env.FAKE_PI_MODE = "hang";
   const { run, registry, sent } = load();
   try {
-    await run({ agent: "scout", task: "look around", background: true });
+    await run({ agent: "scout", task: "look around" });
     const [live] = registry.list();
     await until(() => live.result.live !== undefined);
     registry.stop(live);
@@ -380,7 +422,6 @@ test("parallel background runs notify independently and get a full runtime after
   );
   try {
     const started = await run({
-      background: true,
       timeoutMs: 40,
       tasks: [
         { agent: "scout", task: "unlimited", timeoutMs: 0 },
@@ -436,7 +477,6 @@ test("a timeout delivers captured streaming text as partial output", {
     await run({
       agent: "scout",
       task: "write slowly",
-      background: true,
       timeoutMs: 600,
     });
     await arrived;
@@ -463,7 +503,6 @@ test("a timeout keeps the last finished message before the unfinished one", {
     await run({
       agent: "scout",
       task: "write slowly",
-      background: true,
       timeoutMs: 600,
     });
     await arrived;
@@ -489,7 +528,6 @@ test("a settled run keeps its result if cleanup outlasts the timeout", {
     const started = await run({
       agent: "scout",
       task: "finish before cleanup",
-      background: true,
       timeoutMs: 1_500,
     });
     const { runId } = started.details.results[0];
@@ -504,22 +542,20 @@ test("a settled run keeps its result if cleanup outlasts the timeout", {
   }
 });
 
-test("timeouts are validated and rejected for foreground runs", async () => {
+test("timeouts are validated in every mode", async () => {
   const { run, registry } = load();
   const request = { agent: "scout", task: "work" };
-  await assert.rejects(
-    run({ ...request, timeoutMs: 10 }),
-    /requires background/,
-  );
-  await assert.rejects(
-    run({ tasks: [{ ...request, timeoutMs: 10 }] }),
-    /requires background/,
-  );
-  for (const timeoutMs of [-1, 0.5, 2_147_483_648]) {
-    await assert.rejects(
-      run({ ...request, background: true, timeoutMs }),
-      /must be an integer/,
-    );
+  for (const mode of ["tui", "print"]) {
+    for (const timeoutMs of [-1, 0.5, 2_147_483_648]) {
+      await assert.rejects(
+        run({ ...request, timeoutMs }, mode),
+        /must be an integer/,
+      );
+      await assert.rejects(
+        run({ tasks: [{ ...request, timeoutMs }] }, mode),
+        /must be an integer/,
+      );
+    }
   }
   assert.deepEqual(registry.list(), []);
 });

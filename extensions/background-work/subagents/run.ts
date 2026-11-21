@@ -547,10 +547,11 @@ export async function runAll(
   limiter: Limiter,
   context: RunContext,
   update: () => void,
+  timeouts: number[] = [],
 ): Promise<AgentResult[]> {
   return Promise.all(
     plans.map((plan, index) =>
-      runOne(plan, runs[index], limiter, context, update),
+      runOne(plan, runs[index], limiter, context, update, timeouts[index]),
     ),
   );
 }

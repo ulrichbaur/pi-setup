@@ -186,15 +186,15 @@ Responses and the output the model sees have explicit size limits.
 Its two features load separately.
 If one fails to load, a notice says why, and the other keeps working.
 
-|                    | Shell job                             | Subagent                             |
-| ------------------ | ------------------------------------- | ------------------------------------ |
-| Start              | `task_start`                          | `subagent` with `background: true`   |
-| Check              | `task_status`                         | `subagent_status`                    |
-| Stop               | `task_stop`                           | `subagent_stop`                      |
-| Default time limit | 30 minutes                            | 30 minutes, for background runs only |
-| Result arrives as  | a notice                              | a message                            |
-| When Pi closes     | stops, shown as interrupted on resume | stops, reported on resume            |
-| Config             | none                                  | `subagents.json`                     |
+|                    | Shell job                             | Subagent                                     |
+| ------------------ | ------------------------------------- | -------------------------------------------- |
+| Start              | `task_start`                          | `subagent`                                   |
+| Check              | `task_status`                         | `subagent_status`                            |
+| Stop               | `task_stop`                           | `subagent_stop`                              |
+| Default time limit | 30 minutes                            | 30 minutes                                   |
+| Result arrives as  | a notice                              | a message, or the tool result in print mode  |
+| When Pi closes     | stops, shown as interrupted on resume | stops, reported on resume                    |
+| Config             | none                                  | `subagents.json`                             |
 
 #### The `/tasks` view
 
@@ -274,7 +274,11 @@ Pass that id as `session` with a follow-up `task` to continue the subagent with 
 
 Expanding a tool result shows only that run's conversation,
 live while it runs, with the same components as the main chat.
-With `background: true`, the tool returns at once with a run ID for each subagent.
+The run mode decides whether the tool waits.
+In the terminal and in RPC mode, subagents run in the background:
+the tool returns at once with a run ID for each subagent.
+In print and JSON mode, and in SDK sessions, which default to print mode, the tool waits and returns the results.
+Pi exits after the answer in those modes, which would stop a background run.
 Each run sends its own completion message, even when launched in parallel.
 The message reaches a busy parent before its next model call, or starts a new turn if the parent is idle.
 The parent can call `subagent_status` to list retained background runs or pass `runId` to inspect one without waiting.
@@ -284,11 +288,10 @@ Both tools also accept `session` instead of `runId`.
 A session selects its active run, or else its newest run.
 A run stopped by the user or by `subagent_stop` delivers its result without starting a new turn.
 
-Background runs default to a 30-minute runtime limit, starting when a run gets a slot.
+Subagent runs default to a 30-minute runtime limit, starting when a run gets a slot.
 Set `timeoutMs` at launch, or override it per entry in `tasks`. Use `0` to disable the limit.
 On timeout, the run stops and reports `timed_out` with any captured partial output.
 That output holds the last finished message, then the message that was still streaming, labeled "Unfinished message".
-Foreground runs do not accept `timeoutMs`.
 Background runs stop when the session closes, and their sessions stay saved.
 When the session is opened again, one message lists the interrupted runs without starting a turn.
 For each run, it says how to continue the subagent session, or to launch the run again if no session was saved.

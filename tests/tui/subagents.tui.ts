@@ -87,7 +87,7 @@ const script: Script = (messages) => {
     if (last?.role !== "tool") {
       return {
         tool: "subagent",
-        args: { agent: "scout", task: "TASK busy", background: true },
+        args: { agent: "scout", task: "TASK busy" },
       };
     }
     if (!lastText.includes("Started in the background:"))
@@ -96,25 +96,29 @@ const script: Script = (messages) => {
     return busyParent.promise;
   }
   if (lastText.includes("Background subagent result")) {
-    // A user stop must not start a turn, so this reply marks a bug.
-    if (scenario?.includes("live"))
-      return { text: "Parent reacted to the stop" };
-    return { text: "Parent got the result" };
-  }
-  if (last?.role === "tool") {
+    // A question arrives with the result; the parent answers by continuing.
     const asked = /The subagent asks: .*\n.*session (scout-[0-9a-f]{8})/.exec(
       lastText,
     );
     if (asked) {
       return { tool: "subagent", args: { session: asked[1], task: "blue" } };
     }
+    // A user stop must not start a turn, so this reply marks a bug.
+    if (scenario?.includes("live"))
+      return { text: "Parent reacted to the stop" };
+    if (scenario?.includes("ask")) return { text: "Parent done asking" };
+    return { text: "Parent got the result" };
+  }
+  if (last?.role === "tool") {
     if (scenario?.includes("live"))
       return { text: "Parent waits for live run" };
     if (scenario?.includes("interrupt"))
       return { text: "Parent waits for the run to be interrupted" };
     if (scenario?.includes("background")) return { text: "Parent waits" };
     return {
-      text: scenario?.includes("ask") ? "Parent done asking" : "Parent done",
+      text: scenario?.includes("ask")
+        ? "Parent waits for the answer"
+        : "Parent done",
     };
   }
   if (scenario?.includes("foreground")) {
@@ -126,13 +130,13 @@ const script: Script = (messages) => {
   if (scenario?.includes("live") || scenario?.includes("interrupt")) {
     return {
       tool: "subagent",
-      args: { agent: "scout", task: "TASK wait", background: true },
+      args: { agent: "scout", task: "TASK wait" },
     };
   }
   if (scenario?.includes("background")) {
     return {
       tool: "subagent",
-      args: { agent: "scout", task: "TASK list", background: true },
+      args: { agent: "scout", task: "TASK list" },
     };
   }
   return { text: "Nothing to do" };
@@ -260,12 +264,14 @@ after(() => {
 
 const skip = hasTmux ? false : "tmux is not installed";
 
-test("a foreground run shows its result, transcript, and cost", {
+test("a terminal run returns at once, then shows its result, transcript, and cost", {
   skip,
 }, async () => {
   type("SCENARIO foreground");
   press("Enter");
-  const done = await waitFor(/Parent done/);
+  await waitFor(/Parent done/);
+  const done = await waitFor(/Parent got the result/);
+  assert.match(done, /Background subagent finished/);
   assert.match(done, /✓ scout/);
   assert.match(done, /Scout found the files/);
   assert.match(done, /sub \$0\.\d+/);

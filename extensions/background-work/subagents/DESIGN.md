@@ -130,7 +130,12 @@
 - `maxConcurrency` limits all runs of the session at once,
   across tool calls and background runs, first come, first served.
   A waiting run shows as pending, and stopping it leaves the queue.
-- With `background: true`, the tool returns at once with a unique ID per run and its session ID.
+- The run mode decides between background and foreground; the model does not choose.
+  In `tui` and `rpc` mode, the client stays open for later messages, so runs go to the background.
+  In `print` and `json` mode, Pi exits after the answer, which would stop a background run,
+  so the tool waits. SDK sessions default to `print`.
+  The same time limit applies in every mode.
+- A background launch returns at once with a unique ID per run and its session ID.
   The runs outlive the tool call, so its abort signal does not stop them.
   `/tasks`, `subagent_stop`, and session shutdown can stop them.
 - The saved tool result lists which runs started, not their progress.
