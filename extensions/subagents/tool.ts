@@ -22,7 +22,7 @@ import {
   runOne,
   type TaskRequest,
 } from "./run.ts";
-import type { RunRegistry, SubagentRun } from "./runs.ts";
+import { type RunRegistry, type SubagentRun, stoppedBy } from "./runs.ts";
 import { sessionAgent } from "./sessions.ts";
 import type { AgentDefinition, Delivery, SubagentDetails } from "./types.ts";
 
@@ -83,6 +83,7 @@ export function extensionTool(
       "When a subagent result ends with a question, answer it yourself by continuing that subagent with its session id and your answer as the task. Ask the user only when you cannot answer it.",
       "Set background: true for long work you do not need right away. The tool returns at once, and the result arrives later as a message; continue with other work and do not poll for it.",
       "Each background subagent run sends its own result, even when launched in parallel. Use subagent_status to check a run only when needed.",
+      "Use subagent_stop to stop a background run you no longer need.",
     ],
     parameters: Type.Object({
       agent: Type.Optional(
@@ -252,7 +253,12 @@ export function extensionTool(
             () => registry.changed(),
             timeoutMs,
           ).then((result) =>
-            delivery.deliver(token, { mode: "single", results: [result] }),
+            // The parent already learns the outcome from subagent_stop.
+            delivery.deliver(
+              token,
+              { mode: "single", results: [result] },
+              { triggerTurn: stoppedBy(run) !== "parent" },
+            ),
           );
           const { agent, task, sessionId, runId } = run.result;
           return pendingResult(agent, task, sessionId ?? "", runId);

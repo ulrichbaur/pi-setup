@@ -139,6 +139,10 @@
 - The `subagent_status` tool reads a snapshot by run ID or lists all retained background runs.
   Looking up a run does not affect delivery.
   The TUI status line counts running and queued background runs.
+- The `subagent_stop` tool stops one background run by run ID and waits up to 10 seconds for it to end.
+  The abort reason records who stopped the run, the user or the parent agent.
+  A run the parent stopped still delivers its result message, so restore and cost tracking stay the same.
+  That message does not start a turn, because the tool result already reports the outcome.
 - A background run gets a 30-minute timeout when it takes a concurrency slot.
   A launch can override `timeoutMs` for all tasks or for an individual task; `0` disables it.
   A timeout stops the child and uses the same delivery path as other results.

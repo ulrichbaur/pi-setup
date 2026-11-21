@@ -79,6 +79,10 @@ function load() {
       result?: string;
     }>;
   }>;
+  let halt: (params: { runId: string }) => Promise<{
+    content: Array<{ text: string }>;
+    details: { runId: string; status: string };
+  }>;
   let delivered = () => {};
   const arrived = new Promise<void>((resolve) => {
     delivered = resolve;
@@ -89,6 +93,11 @@ function load() {
         peek = (params) =>
           definition.execute("status", params) as unknown as ReturnType<
             typeof peek
+          >;
+      } else if (definition.name === "subagent_stop") {
+        halt = (params) =>
+          definition.execute("stop", params) as unknown as ReturnType<
+            typeof halt
           >;
       } else {
         tool = definition;
@@ -130,6 +139,7 @@ function load() {
   return {
     run,
     peek: (params: { runId?: string } = {}) => peek(params),
+    halt: (params: { runId: string }) => halt(params),
     sent,
     arrived,
     handlers,
@@ -280,6 +290,68 @@ test("background and foreground runs share one concurrency limit", async () => {
             run.result.progress.status !== "pending",
         ),
     );
+    delete process.env.FAKE_PI_MODE;
+  }
+});
+
+test("the parent stops queued and running background runs without a new turn", {
+  timeout: 8_000,
+}, async () => {
+  process.env.FAKE_PI_MODE = "hang";
+  const { run, registry, halt, sent } = load();
+  try {
+    const started = await run({
+      tasks: [
+        { agent: "scout", task: "first" },
+        { agent: "scout", task: "second" },
+      ],
+      background: true,
+    });
+    const [first, second] = started.details.results.map(
+      (result) => result.runId as string,
+    );
+    const live = registry.list().find((item) => item.result.runId === first);
+    await until(() => live?.result.live !== undefined);
+
+    // maxConcurrency is 1, so the second run waits for a slot.
+    const queued = await halt({ runId: second });
+    assert.equal(queued.details.status, "failed");
+    assert.match(queued.content[0].text, /^Stopped background subagent scout/);
+    const running = await halt({ runId: first });
+    assert.equal(running.details.status, "failed");
+    await until(() => sent.length === 2);
+    for (const { message, options } of sent) {
+      assert.deepEqual(options, { triggerTurn: false, deliverAs: "steer" });
+      const [result] = (message.details as SubagentDetails).results;
+      assert.equal(result.progress.error, "Stopped by the parent agent");
+    }
+
+    const again = await halt({ runId: first });
+    assert.match(again.content[0].text, /had already ended: failed\.$/);
+    await assert.rejects(
+      halt({ runId: "unknown" }),
+      /Unknown background subagent run: unknown/,
+    );
+  } finally {
+    for (const item of registry.list()) registry.stop(item);
+    delete process.env.FAKE_PI_MODE;
+  }
+});
+
+test("a user stop still starts a turn", async () => {
+  process.env.FAKE_PI_MODE = "hang";
+  const { run, registry, sent } = load();
+  try {
+    await run({ agent: "scout", task: "look around", background: true });
+    const [live] = registry.list();
+    await until(() => live.result.live !== undefined);
+    registry.stop(live);
+    await until(() => sent.length === 1);
+    assert.deepEqual(sent[0].options, {
+      triggerTurn: true,
+      deliverAs: "steer",
+    });
+  } finally {
     delete process.env.FAKE_PI_MODE;
   }
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { RunRegistry } from "../../../extensions/subagents/runs.ts";
+import { RunRegistry, stoppedBy } from "../../../extensions/subagents/runs.ts";
 import { fakeRun } from "./fake-run.ts";
 
 test("the registry lists runs newest first and finds active sessions", () => {
@@ -38,8 +38,10 @@ test("stop aborts one active run and ignores finished ones", () => {
   const other = fakeRun("worker-00000002");
   const done = fakeRun("worker-00000003", "completed");
   registry.stop(live);
-  registry.stop(done);
+  registry.stop(done, "parent");
   assert.equal(live.stop.signal.aborted, true);
+  assert.equal(stoppedBy(live), "user");
+  assert.equal(stoppedBy(done), undefined);
   assert.equal(other.stop.signal.aborted, false);
   assert.equal(done.stop.signal.aborted, false);
 });

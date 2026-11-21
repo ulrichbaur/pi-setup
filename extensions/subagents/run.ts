@@ -12,7 +12,7 @@ import { isRecord } from "../../lib/is-record.ts";
 import { CUSTOM_TOOL_EXTENSIONS, findAgent } from "./agents.ts";
 import type { Limiter } from "./limiter.ts";
 import { RpcChild, type RpcRecord } from "./rpc.ts";
-import type { SubagentRun } from "./runs.ts";
+import { RunStop, type SubagentRun } from "./runs.ts";
 import {
   findSession,
   newSessionId,
@@ -352,8 +352,9 @@ function abortReason(
   context: RunContext,
 ): string | undefined {
   if (context.signal?.aborted) return "Subagent was aborted";
-  if (run.stop.signal.reason instanceof RunTimeout)
-    return run.stop.signal.reason.message;
+  const { reason } = run.stop.signal;
+  if (reason instanceof RunTimeout || reason instanceof RunStop)
+    return reason.message;
   if (run.stop.signal.aborted) return "Stopped by the user";
   return undefined;
 }

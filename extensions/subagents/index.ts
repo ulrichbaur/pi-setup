@@ -13,6 +13,7 @@ import { resultKey, savedRuns } from "./restore.ts";
 import { RunRegistry } from "./runs.ts";
 import { pruneSessions } from "./sessions.ts";
 import { statusTool, watchSubagentStatus } from "./status.ts";
+import { stopTool } from "./stop.ts";
 import { extensionTool, type ToolServices } from "./tool.ts";
 import {
   type Delivery,
@@ -34,7 +35,7 @@ export default function subagents(
       pending.add(token);
       return token;
     },
-    deliver(token, details) {
+    deliver(token, details, { triggerTurn = true } = {}) {
       if (!pending.delete(token) || token.cancelled) return;
       pi.sendMessage(
         {
@@ -43,7 +44,7 @@ export default function subagents(
           display: true,
           details,
         },
-        { triggerTurn: true, deliverAs: "steer" },
+        { triggerTurn, deliverAs: "steer" },
       );
     },
   };
@@ -57,6 +58,7 @@ export default function subagents(
   };
   pi.registerTool(extensionTool(config, agents, services));
   pi.registerTool(statusTool(registry));
+  pi.registerTool(stopTool(registry));
 
   pi.registerMessageRenderer<SubagentDetails>(
     RESULT_MESSAGE_TYPE,

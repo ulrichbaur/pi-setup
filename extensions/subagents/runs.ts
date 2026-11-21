@@ -11,6 +11,25 @@ export interface SubagentRun {
   readonly stop: AbortController;
 }
 
+/** Who asked a run to stop. */
+export type StopSource = "user" | "parent";
+
+/** The abort reason of a run that was asked to stop. */
+export class RunStop extends Error {
+  readonly by: StopSource;
+  constructor(by: StopSource) {
+    super(
+      by === "parent" ? "Stopped by the parent agent" : "Stopped by the user",
+    );
+    this.by = by;
+  }
+}
+
+export function stoppedBy(run: SubagentRun): StopSource | undefined {
+  const { reason } = run.stop.signal;
+  return reason instanceof RunStop ? reason.by : undefined;
+}
+
 export function isActive(run: SubagentRun): boolean {
   const { status } = run.result.progress;
   return status === "pending" || status === "running";
@@ -49,7 +68,7 @@ export class RunRegistry {
     for (const listener of this.listeners) listener();
   }
 
-  stop(run: SubagentRun): void {
-    if (isActive(run)) run.stop.abort();
+  stop(run: SubagentRun, by: StopSource = "user"): void {
+    if (isActive(run)) run.stop.abort(new RunStop(by));
   }
 }
