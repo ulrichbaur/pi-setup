@@ -14,6 +14,7 @@ import {
   MAX_TIMER_MS,
   startJob,
 } from "./runner.ts";
+import { taskStatus } from "./status.ts";
 import { STOP_WAIT_MS, stopTask, stopText } from "./stop.ts";
 import {
   displayJobId,
@@ -115,6 +116,46 @@ export default async function backgroundTasks(pi: ExtensionAPI): Promise<void> {
       return {
         content: [{ type: "text", text: stopText(outcome) }],
         details: { jobId: outcome.job.id, state: outcome.job.state },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "task_status",
+    label: "Background task status",
+    description:
+      "List the background jobs of this session, or inspect one by job ID or unique prefix. One job includes the last lines of its log. Returns immediately without consuming completion notices. Use on demand, not to poll for results.",
+    promptSnippet: "Check the state of background shell commands",
+    parameters: Type.Object(
+      {
+        jobId: Type.Optional(
+          Type.String({
+            minLength: 1,
+            description: "Job ID from task_start, or a unique prefix of it.",
+          }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      if (!ctx.sessionManager.getSessionFile()) {
+        throw new Error("Background tasks require a saved Pi session.");
+      }
+      const jobs = await taskStatus(
+        storageRoot(),
+        ctx.sessionManager.getSessionId(),
+        params.jobId,
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: jobs.length
+              ? JSON.stringify(jobs, null, 2)
+              : "No background jobs in this session.",
+          },
+        ],
+        details: jobs,
       };
     },
   });

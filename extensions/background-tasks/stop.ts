@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { type Job, readJob, stopJob } from "./runner.ts";
+import { exitText } from "./status.ts";
 import { findTask, JOB_ID_PREFIX, sessionTasks } from "./task-store.ts";
 
 /** Covers the worker's grace period before it sends SIGKILL, plus a margin. */
@@ -10,12 +11,6 @@ export interface StopOutcome {
   job: Job;
   /** True when the job had finished before the stop request. */
   alreadyEnded: boolean;
-}
-
-function exitText(job: Job): string {
-  const exit =
-    job.signal ?? (job.exitCode == null ? undefined : `exit ${job.exitCode}`);
-  return exit ? ` (${exit})` : "";
 }
 
 export function stopText({ job, alreadyEnded }: StopOutcome): string {

@@ -185,6 +185,7 @@ Responses and the output the model sees have explicit size limits.
 `task_start` runs a shell command in the background and returns its log path.
 Jobs and their logs survive closing Pi. Resume the same session to see them.
 The default timeout is 30 minutes. Set `timeoutMs` to `0` for jobs that should run until stopped.
+`task_status` lists the jobs of the current session, or shows one job with the last 20 lines of its log.
 `task_stop` stops a job of the current session by job ID or unique prefix.
 It waits up to 7 seconds for the job to end and reports its final state.
 A stop takes about 5 seconds, because Pi waits that long before it kills the job's remaining processes.
