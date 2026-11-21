@@ -59,6 +59,12 @@ test("the list shows runs newest first and opens the selected one", () => {
   assert.match(screen(), /Finished: read-only/);
 });
 
+test("a timed-out run shows its own icon and status words", () => {
+  const { registry, screen } = setup();
+  registry.add(fakeRun("scout-00000001", "timed_out"));
+  assert.match(screen(), /◷ scout scout-00000001 · timed out ·/);
+});
+
 test("running and finished transcripts are read-only and cannot switch sessions", () => {
   for (const status of ["running", "completed"] as const) {
     const { registry, overlay, type, screen, isClosed } = setup();

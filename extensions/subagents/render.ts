@@ -27,10 +27,22 @@ export function statusIcon(result: AgentResult, theme: Theme): string {
       return theme.fg("dim", "○");
     case "completed":
       return theme.fg("success", "✓");
+    // A single-width clock: the run ran out of time and may have partial output.
+    case "timed_out":
+      return theme.fg("warning", "◷");
     default:
       return theme.fg("error", "✗");
   }
 }
+
+/** The status as words, for lists. */
+export function statusLabel(result: AgentResult): string {
+  return result.progress.status.replaceAll("_", " ");
+}
+
+const STATUS_HEADINGS: Partial<
+  Record<AgentResult["progress"]["status"], string>
+> = { failed: " (FAILED)", timed_out: " (TIMED OUT)" };
 
 function renderAgent(
   result: AgentResult,
@@ -174,7 +186,7 @@ export function combinedText(details: SubagentDetails): string {
   return details.results
     .map(
       (result) =>
-        `## ${result.agent}${result.progress.status === "failed" ? " (FAILED)" : ""}\n\n${resultText(result)}`,
+        `## ${result.agent}${STATUS_HEADINGS[result.progress.status] ?? ""}\n\n${resultText(result)}`,
     )
     .join("\n\n---\n\n");
 }

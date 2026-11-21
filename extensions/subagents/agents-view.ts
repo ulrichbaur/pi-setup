@@ -7,7 +7,7 @@ import {
   truncateToWidth,
 } from "@earendil-works/pi-tui";
 import { formatCost } from "../../lib/subagent-cost.ts";
-import { statusIcon } from "./render.ts";
+import { statusIcon, statusLabel } from "./render.ts";
 import { isActive, type RunRegistry, type SubagentRun } from "./runs.ts";
 import { sameSession, sessionRows } from "./session-view.ts";
 import { transcriptView } from "./transcript-view.ts";
@@ -157,7 +157,7 @@ export class AgentsOverlay implements Component {
     const { result } = run;
     return `${statusIcon(result, this.theme)} ${this.theme.bold(result.agent)}${result.agentSource ? ` [${result.agentSource}]` : ""} ${this.theme.fg(
       "dim",
-      `${result.sessionId ?? ""} · ${result.progress.status} · ${result.progress.toolCount} tools · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}`,
+      `${result.sessionId ?? ""} · ${statusLabel(result)} · ${result.progress.toolCount} tools · ${formatDuration(result.progress.durationMs)}${result.usage.cost > 0 ? ` · ${formatCost(result.usage.cost)}` : ""}`,
     )}`;
   }
 
