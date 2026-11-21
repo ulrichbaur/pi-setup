@@ -2,10 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
-import {
-  DEFAULT_TIMEOUT_MS,
-  MAX_TIMER_MS,
-} from "../../../lib/background-timeout.ts";
+import { DEFAULT_TIMEOUT_MS, MAX_TIMER_MS } from "../timeout.ts";
 
 export { DEFAULT_TIMEOUT_MS, MAX_TIMER_MS };
 

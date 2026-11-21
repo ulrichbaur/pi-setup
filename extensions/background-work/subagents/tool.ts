@@ -1,10 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import {
-  DEFAULT_TIMEOUT_MS,
-  MAX_TIMER_MS,
-} from "../../../lib/background-timeout.ts";
+import { DEFAULT_TIMEOUT_MS, MAX_TIMER_MS } from "../timeout.ts";
 import type { SubagentConfig } from "./config.ts";
 import type { Limiter } from "./limiter.ts";
 import {

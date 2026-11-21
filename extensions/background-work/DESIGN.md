@@ -6,7 +6,7 @@ The subagent design is in `subagents/DESIGN.md`.
 ## Layout
 
 - `tasks/` and `subagents/` never import from each other.
-- `index.ts`, `view.ts`, `rows.ts`, and `pane.ts` sit above both features and may use either.
+- `index.ts`, `view.ts`, `rows.ts`, `pane.ts`, `guard.ts`, and `timeout.ts` sit above both features and may use either.
 - `index.ts` registers each feature on its own.
   A feature that throws at load is reported at `session_start`, and the other keeps working.
   Its section in `/tasks` shows the error instead of rows.

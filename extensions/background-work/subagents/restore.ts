@@ -34,10 +34,6 @@ function finishedRun(result: AgentResult): SubagentRun {
   return { result, stop: new AbortController() };
 }
 
-/**
- * Oldest first. A background run without a delivered result
- * ended when its session closed.
- */
 /** Where the run's own messages start in its session file. */
 function runStart(runs: readonly SubagentRun[], index: number): number {
   const { sessionId } = runs[index].result;
@@ -96,6 +92,10 @@ export function interruptedResults(
   return results;
 }
 
+/**
+ * The runs saved in the branch, oldest first. A restored run is never
+ * active: one still pending or running ended when its session closed.
+ */
 export function savedRuns(
   entries: readonly unknown[],
   resultMessageType: string,

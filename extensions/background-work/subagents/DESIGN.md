@@ -86,7 +86,7 @@
 - `/tasks` shows subagents next to shell jobs (see `../view.ts`).
   It groups the registry into one display row per subagent session,
   ordered by newest run first.
-  Results without a session id keep separate rows.
+  A saved result without a session id is skipped when the session loads.
   The registry still keeps every active run and the 50 newest finished runs.
   Grouping does not mutate per-run results or cost-event bookkeeping.
   The active run supplies the status and cancellation target;
