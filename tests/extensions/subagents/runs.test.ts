@@ -45,3 +45,46 @@ test("stop aborts one active run and ignores finished ones", () => {
   assert.equal(other.stop.signal.aborted, false);
   assert.equal(done.stop.signal.aborted, false);
 });
+
+test("find selects a background run by run ID or by session", () => {
+  const registry = new RunRegistry();
+  const background = (
+    sessionId: string,
+    runId: string,
+    status?: "completed",
+  ) => {
+    const run = fakeRun(sessionId, status);
+    run.result.runId = runId;
+    registry.add(run);
+    return run;
+  };
+  const older = background("scout-00000001", "run-1", "completed");
+  const active = background("scout-00000001", "run-2");
+  const newer = background("scout-00000001", "run-3", "completed");
+  const finished = background("scout-00000002", "run-4", "completed");
+  const latest = background("scout-00000002", "run-5", "completed");
+  registry.add(fakeRun("scout-00000003"));
+
+  assert.equal(registry.find({ runId: "run-1" }), older);
+  // The active run wins over newer finished runs of the same session.
+  assert.equal(registry.find({ session: "scout-00000001" }), active);
+  assert.notEqual(registry.find({ session: "scout-00000001" }), newer);
+  // Without an active run, the newest run of the session wins.
+  assert.equal(registry.find({ session: "scout-00000002" }), latest);
+  assert.notEqual(registry.find({ session: "scout-00000002" }), finished);
+
+  // Foreground runs have no run ID and are never found.
+  assert.throws(
+    () => registry.find({ session: "scout-00000003" }),
+    /Unknown background subagent run for session: scout-00000003/,
+  );
+  assert.throws(
+    () => registry.find({ runId: "run-9" }),
+    /Unknown background subagent run: run-9/,
+  );
+  assert.throws(
+    () => registry.find({ runId: "run-1", session: "scout-00000001" }),
+    /Pass runId or session, not both\./,
+  );
+  assert.throws(() => registry.find({}), /Pass runId or session\./);
+});

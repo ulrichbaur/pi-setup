@@ -1,6 +1,19 @@
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { RunRegistry, SubagentRun } from "./runs.ts";
+import type { RunLookup, RunRegistry, SubagentRun } from "./runs.ts";
+
+/** The parameters that name one background run, shared by the run tools. */
+export const runLookupFields = {
+  runId: Type.Optional(
+    Type.String({ description: "Run ID from the background launch" }),
+  ),
+  session: Type.Optional(
+    Type.String({
+      description:
+        "Session ID of the subagent; selects its active run, or else its newest run. Do not combine with runId.",
+    }),
+  ),
+};
 
 function describe({ result, startedAt }: SubagentRun, now: number) {
   const { status, durationMs, error, lastMessage } = result.progress;
@@ -31,20 +44,13 @@ export function statusTool(registry: RunRegistry) {
     name: "subagent_status",
     label: "Subagent status",
     description:
-      "List background subagent runs or inspect one by run ID. Returns immediately without consuming completion messages. Use on demand, not to poll for results.",
-    parameters: Type.Object(
-      { runId: Type.Optional(Type.String()) },
-      { additionalProperties: false },
-    ),
-    async execute(_id: string, { runId }: { runId?: string }) {
-      const runs = registry.list().filter((run) => run.result.runId);
+      "List background subagent runs, or inspect one by run ID or session ID. Returns immediately without consuming completion messages. Use on demand, not to poll for results.",
+    parameters: Type.Object(runLookupFields, { additionalProperties: false }),
+    async execute(_id: string, lookup: RunLookup) {
       const selected =
-        runId === undefined
-          ? runs
-          : runs.filter((run) => run.result.runId === runId);
-      if (runId !== undefined && !selected.length) {
-        throw new Error(`Unknown background subagent run: ${runId}`);
-      }
+        lookup.runId === undefined && lookup.session === undefined
+          ? registry.list().filter((run) => run.result.runId)
+          : [registry.find(lookup)];
       const now = Date.now();
       const details = selected.map((run) => describe(run, now));
       return {

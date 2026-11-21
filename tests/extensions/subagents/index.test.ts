@@ -70,7 +70,7 @@ function load() {
       details: SubagentDetails;
     }>;
   };
-  let peek: (params: { runId?: string }) => Promise<{
+  let peek: (params: { runId?: string; session?: string }) => Promise<{
     details: Array<{
       runId: string;
       status: string;
@@ -138,7 +138,7 @@ function load() {
     tool.execute("call", params, undefined, undefined, ctx);
   return {
     run,
-    peek: (params: { runId?: string } = {}) => peek(params),
+    peek: (params: { runId?: string; session?: string } = {}) => peek(params),
     halt: (params: { runId: string }) => halt(params),
     sent,
     arrived,
@@ -188,6 +188,12 @@ test("a background run returns at once and delivers its result later", async () 
   assert.match(started.content[0].text, new RegExp(runId));
   const status = (await peek({ runId })).details[0];
   assert.equal(status.runId, runId);
+  const sessionId = started.details.results[0].sessionId as string;
+  const bySession = (await peek({ session: sessionId })).details;
+  assert.deepEqual(
+    bySession.map((item) => item.runId),
+    [runId],
+  );
   assert.match(status.status, /^(pending|running)$/);
   assert.ok(status.elapsedMs >= 0);
   await assert.rejects(

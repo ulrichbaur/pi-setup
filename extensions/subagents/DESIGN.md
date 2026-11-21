@@ -137,6 +137,8 @@
 - Each run sends one custom completion message, even if other runs from the same call are still active.
   Pi delivers it at the next steering boundary when the parent is busy, or starts a turn when it is idle.
 - The `subagent_status` tool reads a snapshot by run ID or lists all retained background runs.
+  It and `subagent_stop` also accept a session ID.
+  A session has at most one active run, so it resolves to that run, or else to its newest run.
   Looking up a run does not affect delivery.
   The TUI status line counts running and queued background runs.
 - The `subagent_stop` tool stops one background run by run ID and waits up to 10 seconds for it to end.

@@ -63,3 +63,33 @@ test("foreground runs have no run ID and cannot be stopped by the tool", async (
     /Unknown background subagent run/,
   );
 });
+
+test("a session stops its active run", async () => {
+  const registry = new RunRegistry();
+  const run = backgroundRun("run-4");
+  registry.add(run);
+  const result = await stopTool(registry, 20).execute("stop", {
+    session: run.result.sessionId,
+  });
+  assert.equal(stoppedBy(run), "parent");
+  assert.equal(result.details.runId, "run-4");
+  assert.match(result.content[0].text, /run ID: run-4, session: scout-run-4/);
+});
+
+test("a stop needs exactly one of runId and session", async () => {
+  const registry = new RunRegistry();
+  const run = backgroundRun("run-5");
+  registry.add(run);
+  await assert.rejects(
+    stopTool(registry).execute("stop", {}),
+    /Pass runId or session\./,
+  );
+  await assert.rejects(
+    stopTool(registry).execute("stop", {
+      runId: "run-5",
+      session: run.result.sessionId,
+    }),
+    /Pass runId or session, not both\./,
+  );
+  assert.equal(run.stop.signal.aborted, false);
+});

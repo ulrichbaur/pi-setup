@@ -30,6 +30,12 @@ export function stoppedBy(run: SubagentRun): StopSource | undefined {
   return reason instanceof RunStop ? reason.by : undefined;
 }
 
+/** Names one background run by its run ID or by its session ID. */
+export interface RunLookup {
+  runId?: string;
+  session?: string;
+}
+
 export function isActive(run: SubagentRun): boolean {
   const { status } = run.result.progress;
   return status === "pending" || status === "running";
@@ -57,6 +63,29 @@ export class RunRegistry {
     return this.runs.find(
       (run) => isActive(run) && run.result.sessionId === sessionId,
     );
+  }
+
+  /**
+   * Finds one background run. A session resolves to its active run, or else
+   * to its newest run.
+   */
+  find({ runId, session }: RunLookup): SubagentRun {
+    if (runId !== undefined && session !== undefined)
+      throw new Error("Pass runId or session, not both.");
+    const background = this.list().filter((run) => run.result.runId);
+    if (runId !== undefined) {
+      const run = background.find((item) => item.result.runId === runId);
+      if (!run) throw new Error(`Unknown background subagent run: ${runId}`);
+      return run;
+    }
+    if (session === undefined) throw new Error("Pass runId or session.");
+    const runs = background.filter((run) => run.result.sessionId === session);
+    const run = runs.find(isActive) ?? runs[0];
+    if (!run)
+      throw new Error(
+        `Unknown background subagent run for session: ${session}`,
+      );
+    return run;
   }
 
   subscribe(listener: () => void): () => void {
