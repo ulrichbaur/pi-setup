@@ -14,7 +14,14 @@ import {
   MAX_TIMER_MS,
   startJob,
 } from "./runner.ts";
-import { displayJobId, sessionTasks, terminalText } from "./task-store.ts";
+import { STOP_WAIT_MS, stopTask, stopText } from "./stop.ts";
+import {
+  displayJobId,
+  findTask,
+  JOB_ID_PREFIX,
+  sessionTasks,
+  terminalText,
+} from "./task-store.ts";
 import { TaskView, taskStatusLabel } from "./task-view.ts";
 
 const storageRoot = () => join(getAgentDir(), "background-tasks");
@@ -46,7 +53,7 @@ export default async function backgroundTasks(pi: ExtensionAPI): Promise<void> {
           Type.Integer({
             minimum: 0,
             maximum: MAX_TIMER_MS,
-            description: `Maximum runtime in milliseconds. Defaults to ${DEFAULT_TIMEOUT_MS} (30 minutes). Use 0 only for jobs intended to run until stopped.`,
+            description: `Maximum runtime in milliseconds. Defaults to ${DEFAULT_TIMEOUT_MS} (30 minutes). Use 0 only for jobs intended to run until stopped with task_stop.`,
           }),
         ),
       },
@@ -81,13 +88,44 @@ export default async function backgroundTasks(pi: ExtensionAPI): Promise<void> {
     },
   });
 
+  pi.registerTool({
+    name: "task_stop",
+    label: "Stop background task",
+    description: `Stop a background job of this session by job ID or unique prefix. Waits up to ${STOP_WAIT_MS / 1_000} seconds for the job to end and reports its final state.`,
+    promptSnippet: "Stop a background shell command started with task_start",
+    parameters: Type.Object(
+      {
+        jobId: Type.String({
+          minLength: 1,
+          description: "Job ID from task_start, or a unique prefix of it.",
+        }),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      if (!ctx.sessionManager.getSessionFile()) {
+        throw new Error("Background tasks require a saved Pi session.");
+      }
+      const outcome = await stopTask(
+        storageRoot(),
+        ctx.sessionManager.getSessionId(),
+        params.jobId,
+        { signal },
+      );
+      return {
+        content: [{ type: "text", text: stopText(outcome) }],
+        details: { jobId: outcome.job.id, state: outcome.job.state },
+      };
+    },
+  });
+
   async function openTasks(args: string, ctx: ExtensionContext): Promise<void> {
     if (ctx.mode !== "tui") {
       ctx.ui.notify("/tasks requires interactive mode", "error");
       return;
     }
     const prefix = args.trim().toLowerCase();
-    if (prefix && !/^[0-9a-f][0-9a-f-]{0,35}$/.test(prefix)) {
+    if (prefix && !JOB_ID_PREFIX.test(prefix)) {
       ctx.ui.notify("Usage: /tasks [job ID or unique prefix]", "error");
       return;
     }
@@ -99,29 +137,12 @@ export default async function backgroundTasks(pi: ExtensionAPI): Promise<void> {
       const snapshot = await load();
       let id: string | undefined;
       if (prefix) {
-        const matches = snapshot.rows.filter((row) =>
-          row.job.id.startsWith(prefix),
-        );
-        const errors = snapshot.errors.filter((message) =>
-          message.startsWith(prefix),
-        );
-        if (matches.length + errors.length > 1) {
-          ctx.ui.notify(
-            "Multiple jobs match. Enter a longer job ID prefix.",
-            "error",
-          );
+        const found = findTask(snapshot, prefix);
+        if ("error" in found) {
+          ctx.ui.notify(found.error, "error");
           return;
         }
-        id = matches[0]?.job.id;
-        if (!id) {
-          ctx.ui.notify(
-            errors[0]
-              ? terminalText(errors[0])
-              : "No such background job in this session",
-            "error",
-          );
-          return;
-        }
+        id = found.row.job.id;
       }
       await ctx.ui.custom<void>(
         (tui, theme, keys, done) => {

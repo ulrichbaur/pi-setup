@@ -85,6 +85,26 @@ export async function sessionTasks(
   return { rows, errors: errors.sort() };
 }
 
+/** A full job ID or a prefix of one, in lowercase. */
+export const JOB_ID_PREFIX = /^[0-9a-f][0-9a-f-]{0,35}$/;
+
+/** Finds the one job whose ID starts with the prefix. */
+export function findTask(
+  { rows, errors }: { rows: readonly TaskRow[]; errors: readonly string[] },
+  prefix: string,
+): { row: TaskRow } | { error: string } {
+  const matches = rows.filter((row) => row.job.id.startsWith(prefix));
+  const unreadable = errors.filter((message) => message.startsWith(prefix));
+  if (matches.length + unreadable.length > 1)
+    return { error: "Multiple jobs match. Enter a longer job ID prefix." };
+  if (matches[0]) return { row: matches[0] };
+  return {
+    error: unreadable[0]
+      ? terminalText(unreadable[0])
+      : "No such background job in this session",
+  };
+}
+
 export function displayJobId(
   id: string,
   { rows, errors }: { rows: readonly TaskRow[]; errors: readonly string[] },
