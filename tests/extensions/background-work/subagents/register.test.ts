@@ -139,8 +139,11 @@ function load() {
     ui: {},
   };
   // The terminal runs subagents in the background; print mode waits.
-  const run = (params: Record<string, unknown>, mode = "tui") =>
-    tool.execute("call", params, undefined, undefined, { ...ctx, mode });
+  const run = (
+    params: Record<string, unknown>,
+    mode = "tui",
+    signal?: AbortSignal,
+  ) => tool.execute("call", params, signal, undefined, { ...ctx, mode });
   return {
     run,
     peek: (params: { runId?: string; session?: string } = {}) => peek(params),
@@ -245,6 +248,32 @@ test("RPC mode runs in the background, like the terminal", async () => {
   assert.equal(sent.length, 1);
 });
 
+test("an aborted call in print mode stops its run", async () => {
+  process.env.FAKE_PI_MODE = "hang";
+  const { run, registry } = load();
+  try {
+    const controller = new AbortController();
+    const pending = run(
+      { agent: "scout", task: "wait" },
+      "print",
+      controller.signal,
+    );
+    const [live] = registry.list();
+    await until(() => live.result.live !== undefined);
+    controller.abort();
+    const result = await pending;
+    const [stopped] = result.details.results;
+    assert.equal(stopped.progress.status, "stopped");
+    assert.equal(stopped.progress.error, "Subagent was aborted");
+    assert.equal(
+      result.content[0].text.split("\n")[0],
+      "Subagent was aborted.",
+    );
+  } finally {
+    delete process.env.FAKE_PI_MODE;
+  }
+});
+
 test("a leftover background argument does not change the mode", async () => {
   const { run } = load();
   const result = await run(
@@ -281,7 +310,7 @@ test("results of a shut-down session are never delivered", async () => {
   await run({ agent: "scout", task: "look around" });
   handlers.session_shutdown();
   await until(() =>
-    registry.list().every((run) => run.result.progress.status === "failed"),
+    registry.list().every((run) => run.result.progress.status === "stopped"),
   );
   // Delivery follows in the same promise chain, before the next macrotask.
   await new Promise((resolve) => setImmediate(resolve));
@@ -319,7 +348,7 @@ test("background and foreground runs share one concurrency limit", async () => {
     registry.stop(second);
     await foreground;
     const firstRunning = statuses.find((pair) => pair.endsWith("/running"));
-    assert.equal(firstRunning, "failed/running");
+    assert.equal(firstRunning, "stopped/running");
     assert.equal(second.result.progress.error, "Stopped by the user");
   } finally {
     // A failed assertion must not leave hanging children behind.
@@ -357,10 +386,10 @@ test("the parent stops queued and running background runs without a new turn", {
 
     // maxConcurrency is 1, so the second run waits for a slot.
     const queued = await halt({ runId: second });
-    assert.equal(queued.details.status, "failed");
+    assert.equal(queued.details.status, "stopped");
     assert.match(queued.content[0].text, /^Stopped background subagent scout/);
     const running = await halt({ runId: first });
-    assert.equal(running.details.status, "failed");
+    assert.equal(running.details.status, "stopped");
     await until(() => sent.length === 2);
     for (const { message, options } of sent) {
       assert.deepEqual(options, { triggerTurn: false, deliverAs: "steer" });
@@ -369,7 +398,7 @@ test("the parent stops queued and running background runs without a new turn", {
     }
 
     const again = await halt({ runId: first });
-    assert.match(again.content[0].text, /had already ended: failed\.$/);
+    assert.match(again.content[0].text, /had already ended: stopped\.$/);
     await assert.rejects(
       halt({ runId: "unknown" }),
       /Unknown background subagent run: unknown/,

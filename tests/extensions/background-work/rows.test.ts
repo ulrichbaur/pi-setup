@@ -145,3 +145,19 @@ test("completions name each entry's kind, jobs first", () => {
   // A typed prefix longer than the short ID is kept.
   assert.equal(completions(sections, "a1f03e0")[0].value, "a1f03e0");
 });
+
+test("stopped and interrupted subagents read as neither success nor failure", () => {
+  const runs = [
+    fakeRun("scout-00000011", "stopped"),
+    fakeRun("scout-00000012", "interrupted"),
+  ];
+  const [stopped, interrupted] = buildSections(undefined, runs).subagentHistory;
+  assert.deepEqual(itemStatus(stopped), {
+    text: "Stopped · 0s",
+    tone: "muted",
+  });
+  assert.deepEqual(itemStatus(interrupted), {
+    text: "Interrupted · 0s",
+    tone: "muted",
+  });
+});

@@ -99,7 +99,7 @@
   so `session_start` rebuilds the finished runs from the session branch:
   foreground tool results and delivered background results.
   A background run that never delivered ended with its session
-  and shows as stopped.
+  and shows as `interrupted`.
   Extension commands run while Pi streams, so it opens during a run.
 - A session opens to its continuous transcript, which follows new output
   until the user scrolls up.
@@ -123,7 +123,10 @@
 - `x` stops the selected session's active run, even if the detail view
   opened before that run started.
   The other runs of the same tool call continue,
-  and the stopped one fails with "Stopped by the user".
+  and the stopped one ends as `stopped` with "Stopped by the user".
+- A run ends as `stopped` when the user, `subagent_stop`, or an aborted tool call stops it,
+  and as `interrupted` when its session closes.
+  Neither counts as a failure, so both show in a muted color.
 
 ## Background
 

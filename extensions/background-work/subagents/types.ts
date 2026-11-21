@@ -23,7 +23,16 @@ export interface UsageStats {
 }
 
 interface AgentProgress {
-  status: "pending" | "running" | "completed" | "failed" | "timed_out";
+  status:
+    | "pending"
+    | "running"
+    | "completed"
+    | "failed"
+    | "timed_out"
+    // Stopped on request: by the user, subagent_stop, or an aborted call.
+    | "stopped"
+    // Cut off when Pi closed its session.
+    | "interrupted";
   currentTool?: string;
   currentToolArgs?: string;
   recentTools: ToolEvent[];

@@ -359,7 +359,9 @@ test("a live transcript stays read-only and the selected run can be cancelled", 
   await waitFor(/Finished: read-only/);
   assert.match(screen(), /Stopped by the user/);
   press("Escape");
-  await waitFor(/Subagent history/);
+  // A stop is neither a success nor a failure.
+  const list = await waitFor(/agent {2}scout-[0-9a-f]{8} +Stopped/);
+  assert.match(list, /Subagent history/);
   press("Escape");
   // The stopped result shows in the chat, but the parent stays idle.
   await waitFor(/^(?![\s\S]*Background work)[\s\S]*Error: Stopped by the user/);
@@ -417,7 +419,7 @@ test("a resumed session tells the model about a run its close interrupted", {
 
   startPi("--continue");
   const resumed = await waitFor(/Background subagent interrupted/);
-  assert.match(resumed, /Stopped when its session closed/);
+  assert.match(resumed, /Interrupted when its session closed/);
   assert.match(resumed, /session\s+scout-[0-9a-f]{8}\s+is\s+saved/);
   assert.doesNotMatch(resumed, /Parent knows about the interrupted run/);
   type("SCENARIO resumed");

@@ -102,6 +102,8 @@ const AGENT_STATUS: Record<
   completed: ["Completed", "success"],
   failed: ["Failed", "error"],
   timed_out: ["Timed out", "warning"],
+  stopped: ["Stopped", "muted"],
+  interrupted: ["Interrupted", "muted"],
 };
 
 function taskTone({ state, job }: TaskRow): Tone {

@@ -347,6 +347,14 @@ class RunTimeout extends Error {
   }
 }
 
+/** A stop on request, as opposed to a timeout or a failure. */
+function wasStopped(run: SubagentRun, context: RunContext): boolean {
+  return (
+    Boolean(context.signal?.aborted) ||
+    run.stop.signal.reason instanceof RunStop
+  );
+}
+
 function abortReason(
   run: SubagentRun,
   context: RunContext,
@@ -512,6 +520,9 @@ async function runAgent(
       .filter(Boolean)
       .join("\n\n");
     result.question = undefined;
+  } else if (wasStopped(run, context)) {
+    result.progress.status = "stopped";
+    result.output ||= `${result.progress.error}.`;
   } else {
     result.progress.status = finalStatus(
       result.exitCode,
@@ -575,16 +586,22 @@ export async function runOne(
   } catch (error) {
     const { result, startedAt } = run;
     const timedOut = run.stop.signal.reason instanceof RunTimeout;
+    const stopped = !timedOut && wasStopped(run, context);
     if (result.live)
       releaseTranscript([...result.live.messages, result.live.streaming]);
     result.live = undefined;
-    result.progress.status = timedOut ? "timed_out" : "failed";
+    result.progress.status = timedOut
+      ? "timed_out"
+      : stopped
+        ? "stopped"
+        : "failed";
     if (startedAt !== undefined)
       result.progress.durationMs = Date.now() - startedAt;
     result.progress.error =
       abortReason(run, context) ??
       (error instanceof Error ? error.message : String(error));
-    if (!timedOut) result.output ||= `Error: ${result.progress.error}`;
+    if (stopped) result.output ||= `${result.progress.error}.`;
+    else if (!timedOut) result.output ||= `Error: ${result.progress.error}`;
   }
   update();
   return run.result;

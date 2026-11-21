@@ -39,7 +39,15 @@ test("each status has its own icon, and a timeout is a warning", () => {
     fg: (color: string, text: string) => `${color}:${text}`,
   } as unknown as Theme;
   const icons = (
-    ["pending", "running", "completed", "timed_out", "failed"] as const
+    [
+      "pending",
+      "running",
+      "completed",
+      "timed_out",
+      "failed",
+      "stopped",
+      "interrupted",
+    ] as const
   ).map((status) =>
     statusIcon(fakeRun("scout-00000001", status).result, theme),
   );
@@ -49,17 +57,19 @@ test("each status has its own icon, and a timeout is a warning", () => {
     "success:✓",
     "warning:◷",
     "error:✗",
+    "muted:■",
+    "muted:■",
   ]);
 });
 
-test("parallel headings mark failed and timed-out runs", () => {
-  const results = (["completed", "failed", "timed_out"] as const).map(
-    (status) => {
-      const { result } = fakeRun("scout-00000001", status);
-      result.output = "Output.";
-      return result;
-    },
-  );
+test("parallel headings mark every run that did not complete", () => {
+  const results = (
+    ["completed", "failed", "timed_out", "stopped", "interrupted"] as const
+  ).map((status) => {
+    const { result } = fakeRun("scout-00000001", status);
+    result.output = "Output.";
+    return result;
+  });
   const headings = combinedText({ mode: "parallel", results })
     .split("\n")
     .filter((line) => line.startsWith("## "));
@@ -67,5 +77,7 @@ test("parallel headings mark failed and timed-out runs", () => {
     "## scout",
     "## scout (FAILED)",
     "## scout (TIMED OUT)",
+    "## scout (STOPPED)",
+    "## scout (INTERRUPTED)",
   ]);
 });

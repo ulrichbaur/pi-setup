@@ -287,6 +287,7 @@ That tool waits up to 10 seconds for the run to end.
 Both tools also accept `session` instead of `runId`.
 A session selects its active run, or else its newest run.
 A run stopped by the user or by `subagent_stop` delivers its result without starting a new turn.
+It shows as Stopped, and a run cut off when Pi closed shows as Interrupted.
 
 Subagent runs default to a 30-minute runtime limit, starting when a run gets a slot.
 Set `timeoutMs` at launch, or override it per entry in `tasks`. Use `0` to disable the limit.

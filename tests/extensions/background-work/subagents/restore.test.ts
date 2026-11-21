@@ -57,7 +57,7 @@ test("saved tool results and delivered messages become finished runs", () => {
     ]),
     [
       ["scout-00000001", "completed", undefined],
-      ["worker-00000003", "failed", "Stopped when its session closed"],
+      ["worker-00000003", "interrupted", "Interrupted when its session closed"],
       ["worker-00000002", "completed", undefined],
     ],
   );
@@ -90,7 +90,7 @@ test("background continuations restore by run ID rather than session ID", () => 
       Boolean(undelivered),
     ]),
     [
-      ["second", "failed", true],
+      ["second", "interrupted", true],
       ["first", "completed", false],
     ],
   );
@@ -126,8 +126,8 @@ test("interrupted launches report whether their session can be continued", () =>
   assert.deepEqual(
     results.map(({ runId, progress }) => [runId, progress.status]),
     [
-      ["saved", "failed"],
-      ["unsaved", "failed"],
+      ["saved", "interrupted"],
+      ["unsaved", "interrupted"],
     ],
   );
   assert.match(
@@ -136,5 +136,8 @@ test("interrupted launches report whether their session can be continued", () =>
   );
   assert.match(results[1].output, /No subagent session was saved/);
   assert.equal(results[1].progress.lastMessage, results[1].output);
-  assert.equal(results[0].progress.error, "Stopped when its session closed");
+  assert.equal(
+    results[0].progress.error,
+    "Interrupted when its session closed",
+  );
 });

@@ -30,6 +30,10 @@ export function statusIcon(result: AgentResult, theme: Theme): string {
     // A single-width clock: the run ran out of time and may have partial output.
     case "timed_out":
       return theme.fg("warning", "◷");
+    // A stop on request or by Pi closing is neither success nor failure.
+    case "stopped":
+    case "interrupted":
+      return theme.fg("muted", "■");
     default:
       return theme.fg("error", "✗");
   }
@@ -42,7 +46,12 @@ export function statusLabel(result: AgentResult): string {
 
 const STATUS_HEADINGS: Partial<
   Record<AgentResult["progress"]["status"], string>
-> = { failed: " (FAILED)", timed_out: " (TIMED OUT)" };
+> = {
+  failed: " (FAILED)",
+  timed_out: " (TIMED OUT)",
+  stopped: " (STOPPED)",
+  interrupted: " (INTERRUPTED)",
+};
 
 function renderAgent(
   result: AgentResult,

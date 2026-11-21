@@ -105,8 +105,8 @@ export function savedRuns(
   for (const run of undelivered.values()) {
     run.result.progress = {
       ...run.result.progress,
-      status: "failed",
-      error: "Stopped when its session closed",
+      status: "interrupted",
+      error: "Interrupted when its session closed",
     };
   }
   return runs;
