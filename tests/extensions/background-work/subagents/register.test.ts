@@ -63,6 +63,7 @@ type Command = {
 };
 
 function load() {
+  let closed = false;
   const sent: Sent[] = [];
   const costs: unknown[] = [];
   const handlers: Record<string, Handler> = {};
@@ -112,7 +113,11 @@ function load() {
     },
     registerMessageRenderer: () => {},
     events: {
-      emit: (channel: string, data: unknown) => costs.push([channel, data]),
+      // Like Pi's, the API throws once its runtime is closed.
+      emit: (channel: string, data: unknown) => {
+        if (closed) throw new Error("This extension ctx is stale");
+        costs.push([channel, data]);
+      },
       on: () => () => {},
     },
     // Pi runs every handler of an event in registration order.
@@ -132,11 +137,17 @@ function load() {
   } as unknown as ExtensionAPI;
   const registry = new RunRegistry();
   subagents(pi, registry);
+  const notices: string[] = [];
   const ctx = {
     cwd: process.cwd(),
     modelRegistry: { getAvailable: () => [] },
-    hasUI: false,
-    ui: {},
+    hasUI: true,
+    ui: {
+      notify: (message: string) => {
+        if (closed) throw new Error("This extension ctx is stale");
+        notices.push(message);
+      },
+    },
   };
   // The terminal runs subagents in the background; print mode waits.
   const run = (
@@ -146,6 +157,11 @@ function load() {
   ) => tool.execute("call", params, signal, undefined, { ...ctx, mode });
   return {
     run,
+    notices,
+    // Pi invalidates the old runtime after its shutdown handlers run.
+    close: () => {
+      closed = true;
+    },
     peek: (params: { runId?: string; session?: string } = {}) => peek(params),
     halt: (params: { runId: string }) => halt(params),
     sent,
@@ -424,6 +440,28 @@ test("a user stop delivers the result without starting a turn", async () => {
     });
     const [result] = (sent[0].message.details as SubagentDetails).results;
     assert.equal(result.progress.error, "Stopped by the user");
+  } finally {
+    delete process.env.FAKE_PI_MODE;
+  }
+});
+
+test("a run stopped by a reload never reaches the closed runtime", {
+  timeout: 8_000,
+}, async () => {
+  process.env.FAKE_PI_MODE = "partial";
+  const { run, registry, handlers, close, notices, costs } = load();
+  try {
+    await run({ agent: "scout", task: "write slowly" });
+    const [live] = registry.list();
+    await until(() => live.result.live?.streaming !== undefined);
+    handlers.session_shutdown({ reason: "reload" });
+    close();
+    const reported = costs.length;
+    // The child still reports a notification and a cost while it stops.
+    await until(() => live.result.progress.status === "stopped");
+    assert.equal(live.result.usage.cost, 0.01);
+    assert.deepEqual(notices, []);
+    assert.equal(costs.length, reported);
   } finally {
     delete process.env.FAKE_PI_MODE;
   }

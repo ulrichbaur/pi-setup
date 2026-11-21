@@ -96,6 +96,9 @@ export function registerSubagents(
   );
   let disposeStatus: (() => void) | undefined;
   pi.on("session_shutdown", () => {
+    // The old runtime's pi is invalid after shutdown, while stopping children
+    // still report events.
+    unsubscribeCost();
     disposeStatus?.();
     disposeStatus = undefined;
     for (const token of pending) token.cancelled = true;
@@ -129,7 +132,7 @@ export function registerSubagents(
     reportCost();
     return runs;
   };
-  registry.subscribe(reportCost);
+  const unsubscribeCost = registry.subscribe(reportCost);
   pi.on("session_tree", (_event, ctx) => {
     branchRuns(ctx.sessionManager.getBranch());
   });

@@ -2,8 +2,8 @@
 // "complete" finishes each prompt, "crash" exits during a prompt,
 // "hang" waits until it receives an abort command, and "linger" keeps
 // running after stdin closes. "partial" streams text and waits for abort;
-// "partial-after-message" first finishes one message. On abort, both end
-// the streaming message with its text, as Pi does.
+// "partial-after-message" first finishes one message. On abort, both send a
+// notification and end the streaming message with its text and cost.
 import { createLineSplitter } from "../../../../extensions/background-work/subagents/rpc.ts";
 
 const MODES = [
@@ -47,12 +47,21 @@ const splitter = createLineSplitter((line) => {
   }
   if (record.type === "abort") {
     if (mode.startsWith("partial")) {
+      // An extension reports, and the cut-off message carries its cost.
+      send({
+        type: "extension_ui_request",
+        id: "notify-1",
+        method: "notify",
+        message: "stopping",
+        notifyType: "info",
+      });
       send({
         type: "message_end",
         message: {
           role: "assistant",
           content: [{ type: "text", text: STREAMED }],
           stopReason: "aborted",
+          usage: { cost: { total: 0.01 } },
         },
       });
     }

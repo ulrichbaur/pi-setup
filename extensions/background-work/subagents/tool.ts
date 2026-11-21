@@ -242,11 +242,18 @@ export function extensionTool(
         const detached = { ...context, signal: undefined };
         const started = runs.map((run, index) => {
           const token = delivery.start();
+          // A run's notifications end with its session, like its delivery.
+          const parent = context.ui;
+          const ui: ParentUI | undefined = parent && {
+            notify: (message, type) => {
+              if (!token.cancelled) parent.notify(message, type);
+            },
+          };
           void runOne(
             plans[index],
             run,
             limiter,
-            detached,
+            { ...detached, ui },
             () => registry.changed(),
             timeouts[index],
           ).then((result) =>
