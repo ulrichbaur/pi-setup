@@ -27,6 +27,10 @@ export type JobListener = (job: Job, dir: string) => void;
 export class JobRegistry {
   private readonly live = new Map<string, LiveJob>();
   private readonly listeners = new Set<JobListener>();
+  private readonly endListeners = new Set<JobListener>();
+  // Ends recorded during a reload handover, before the next runtime listens.
+  private heldEnds: Array<[Job, string]> = [];
+  private holding = false;
 
   async start(
     root: string,
@@ -91,6 +95,20 @@ export class JobRegistry {
   /** The jobs that have not ended, oldest first. */
   active(): Job[] {
     return [...this.live.values()].map((entry) => entry.job);
+  }
+
+  /** Calls `listener` with each job that ends, after any held during a handover. */
+  onEnd(listener: JobListener): () => void {
+    this.endListeners.add(listener);
+    const held = this.heldEnds.splice(0);
+    this.holding = false;
+    for (const [job, dir] of held) listener(job, dir);
+    return () => this.endListeners.delete(listener);
+  }
+
+  /** Holds the ends of jobs until the next `onEnd` listener subscribes. */
+  holdEnds(): void {
+    this.holding = true;
   }
 
   subscribe(listener: JobListener): () => void {
@@ -169,6 +187,9 @@ export class JobRegistry {
       state,
       finishedAt: new Date().toISOString(),
     });
+    if (this.holding) this.heldEnds.push([entry.job, entry.dir]);
+    else
+      for (const listener of this.endListeners) listener(entry.job, entry.dir);
   }
 
   private update(entry: LiveJob, changes: Partial<Job>): void {
@@ -188,13 +209,14 @@ export class JobRegistry {
  * stops the old runtime's jobs instead of handing them to code that may not
  * fit them.
  */
-export const REGISTRY_VERSION = 1;
+export const REGISTRY_VERSION = 2;
 const HANDOVER = Symbol.for("pi-setup/background-work/job-registry");
 type Handover = { version?: number; registry?: Partial<JobRegistry> };
 const slots = globalThis as Record<symbol, Handover | undefined>;
 
 /** Keeps the registry, and its running jobs, for the runtime a reload loads. */
 export function handOver(registry: JobRegistry): void {
+  registry.holdEnds();
   slots[HANDOVER] = { version: REGISTRY_VERSION, registry };
 }
 

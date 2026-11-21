@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
@@ -217,3 +217,44 @@ test("a registry from other code is stopped, not handed over", () => {
   assert.equal(stopped, true);
   assert.ok(registry instanceof JobRegistry);
 });
+
+test(
+  "a job that ends during a handover reaches the next end listener once",
+  options,
+  async () => {
+    await withTempDir("pi-bg-registry-", async (root) => {
+      const registry = new JobRegistry();
+      const dir = await running(
+        registry,
+        root,
+        "while [ ! -e go ]; do sleep 0.05; done",
+      );
+      handOver(registry);
+      writeFileSync(join(root, "go"), "");
+      await until(() => readJob(dir).finishedAt !== undefined);
+      assert.equal(takeOver(), registry);
+      const ends: string[] = [];
+      registry.onEnd((job) => ends.push(job.state));
+      registry.onEnd((job) => ends.push(`again ${job.state}`));
+      assert.deepEqual(ends, ["exited"]);
+    });
+  },
+);
+
+test(
+  "without a handover, an end with no listener is not held",
+  options,
+  async () => {
+    await withTempDir("pi-bg-registry-", async (root) => {
+      const registry = new JobRegistry();
+      const { dir } = await registry.start(root, session, {
+        cwd: root,
+        command: "exit 0",
+      });
+      await until(() => readJob(dir).finishedAt !== undefined);
+      const ends: string[] = [];
+      registry.onEnd((job) => ends.push(job.state));
+      assert.deepEqual(ends, []);
+    });
+  },
+);

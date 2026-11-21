@@ -6,6 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerTasks } from "../../../../extensions/background-work/tasks/register.ts";
 import {
   DEFAULT_TIMEOUT_MS,
   jobDir,
@@ -13,6 +15,7 @@ import {
 } from "../../../../extensions/background-work/tasks/runner.ts";
 import { withTempDir } from "../../../helpers.ts";
 import { startFakeModel, text } from "../../../tui/fake-model.ts";
+import { until } from "./fake-jobs.ts";
 
 const exec = promisify(execFile);
 const repo = resolve(import.meta.dirname, "../../../..");
@@ -159,6 +162,63 @@ test("a job stops with Pi, ends as interrupted, and keeps its log for a resume",
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+test("a job end during shutdown reaches neither the closed pi nor its ctx", {
+  skip: process.platform === "win32",
+  timeout: 20_000,
+}, async () => {
+  await withTempDir("pi-background-close-", async (root) => {
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = root;
+    try {
+      let closed = false;
+      const stale = () => {
+        if (closed) throw new Error("This extension ctx is stale");
+      };
+      const handlers: Record<string, (event: unknown, ctx?: unknown) => void> =
+        {};
+      const sent: unknown[] = [];
+      const pi = {
+        registerTool: () => {},
+        on: (
+          event: string,
+          handler: (event: unknown, ctx?: unknown) => void,
+        ) => {
+          handlers[event] = handler;
+        },
+        sendMessage: (message: unknown) => {
+          stale();
+          sent.push(message);
+        },
+      } as unknown as ExtensionAPI;
+      const { registry, root: jobs } = await registerTasks(pi);
+      const sessionId = "00112233-4455-6677-8899-aabbccddeeff";
+      handlers.session_start(
+        {},
+        {
+          mode: "tui",
+          sessionManager: { getSessionId: () => sessionId },
+          ui: { notify: stale, setStatus: () => {} },
+        },
+      );
+      // The notice starts its read; then the session shuts down.
+      registry.onEnd(() => {
+        handlers.session_shutdown({ reason: "quit" });
+        closed = true;
+      });
+      const { dir } = await registry.start(jobs(), sessionId, {
+        cwd: root,
+        command: "exit 0",
+      });
+      await until(() => readJob(dir).finishedAt !== undefined);
+      await delay(200);
+      assert.deepEqual(sent, []);
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
     }
   });
 });

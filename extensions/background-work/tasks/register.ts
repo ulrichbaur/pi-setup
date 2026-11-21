@@ -169,13 +169,18 @@ export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
     },
   });
 
+  // After shutdown, this runtime's pi and ctx are no longer valid.
+  let closed = false;
+
   // Each notice names the job by its shortest unique ID prefix.
   async function announce(
     rows: Awaited<ReturnType<typeof sessionTasks>>["rows"],
     sessionId: string,
     triggerTurn: boolean,
   ): Promise<void> {
+    if (closed) return;
     const snapshot = await sessionTasks(storageRoot(), sessionId);
+    if (closed) return;
     sendTaskNotice(
       pi,
       rows.map((row) => ({ row, shortId: displayJobId(row.job.id, snapshot) })),
@@ -204,22 +209,25 @@ export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
     if (ctx.mode === "tui") {
       disposers.push(watchTaskFooter(ctx.ui, registry));
       disposers.push(
-        registry.subscribe((job: Job, dir: string) => {
-          if (!job.finishedAt || !dir.startsWith(own)) return;
+        registry.onEnd((job: Job, dir: string) => {
+          if (!dir.startsWith(own)) return;
           const row = { job, state: job.state, dir };
           // A stop was requested on purpose, so it does not wake the agent.
           void announce([row], sessionId, job.state !== "stopped").catch(
-            (error: unknown) =>
+            (error: unknown) => {
+              if (closed) return;
               ctx.ui.notify(
                 `Background task notice failed: ${terminalText(String(error))}`,
                 "error",
-              ),
+              );
+            },
           );
         }),
       );
     }
     void interruptedTasks(root, sessionId, (id) => registry.owns(id))
       .then(async ({ rows, errors }) => {
+        if (closed) return;
         for (const error of errors)
           ctx.ui.notify(
             `Background task record unavailable: ${terminalText(error)}`,
@@ -229,14 +237,16 @@ export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
         await announce(rows, sessionId, false);
         for (const row of rows) markNoticeSent(row);
       })
-      .catch((error: unknown) =>
+      .catch((error: unknown) => {
+        if (closed) return;
         ctx.ui.notify(
           `Could not check for interrupted background tasks: ${terminalText(String(error))}`,
           "error",
-        ),
-      );
+        );
+      });
   });
   pi.on("session_shutdown", (event) => {
+    closed = true;
     for (const dispose of disposers) dispose();
     disposers = [];
     // A reload keeps the session, so its jobs keep running.

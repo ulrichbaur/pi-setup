@@ -35,6 +35,10 @@ The subagent design is in `subagents/DESIGN.md`.
   The registry refers to no old runtime state, and its listeners are removed at shutdown.
   The slot carries `REGISTRY_VERSION`.
   When the version differs, the new runtime stops the old jobs instead of reusing code that may not fit them.
+- During the handover, the registry holds the ends of jobs that finish before the new runtime listens.
+  The new runtime's notice listener receives them once, so no end goes unannounced.
+- After shutdown, an old runtime's notices do nothing.
+  Its `pi` and `ctx` are no longer valid, and a notice may still be on its way.
 - Subagents do not survive a reload.
   Their delivery holds the old runtime's `pi`, which a reload invalidates.
 - When the IPC channel closes before a release, Pi is gone.
