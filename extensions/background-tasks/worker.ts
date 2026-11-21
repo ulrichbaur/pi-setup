@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
-import { readJob } from "./runner.ts";
+import { readJob, saveJob } from "./runner.ts";
 
 export type WorkerEvent =
   | { type: "started" }
@@ -11,12 +11,38 @@ export type WorkerEvent =
 const STOP_GRACE_MS = 5_000;
 
 function run(dir: string): void {
-  const send = process.send?.bind(process);
-  if (!send)
-    throw new Error("The job worker requires a supervisor IPC channel");
+  if (!process.send)
+    throw new Error("The job worker requires an IPC channel to Pi");
+  // Pi may be gone. A send then fails, which the callback absorbs, and the
+  // disconnect handler takes over.
+  const send = (event: WorkerEvent) => {
+    if (process.connected) process.send?.(event, undefined, {}, () => {});
+  };
   const job = readJob(dir);
   let stopping = false;
   let released = false;
+  let exit:
+    | Pick<Extract<WorkerEvent, { type: "exited" }>, "exitCode" | "signal">
+    | undefined;
+
+  // Pi records the end of a job it owns. Once Pi is gone, the worker does.
+  function recordEnd() {
+    try {
+      const latest = readJob(dir);
+      if (latest.finishedAt) return;
+      saveJob(dir, {
+        ...latest,
+        // A shell that ended on its own exited; one Pi was stopping, or
+        // that still runs, was interrupted when Pi closed.
+        ...(exit && !stopping
+          ? { state: "exited", exitCode: exit.exitCode, signal: exit.signal }
+          : { state: "interrupted" }),
+        finishedAt: new Date().toISOString(),
+      });
+    } catch {
+      // The record stays unfinished; Pi marks it interrupted on its next start.
+    }
+  }
 
   // The worker is the process-group leader and stays alive through escalation.
   // It signals its own group, so it never targets a reused PID or group ID.
@@ -35,7 +61,9 @@ function run(dir: string): void {
     }
   });
   process.on("disconnect", () => {
-    if (!released) stop();
+    if (released) return;
+    recordEnd();
+    stop();
   });
 
   try {
@@ -51,9 +79,10 @@ function run(dir: string): void {
       shell.once("error", (error) =>
         send({ type: "error", error: error.message } satisfies WorkerEvent),
       );
-      shell.once("exit", (exitCode, signal) =>
-        send({ type: "exited", exitCode, signal } satisfies WorkerEvent),
-      );
+      shell.once("exit", (exitCode, signal) => {
+        exit = { exitCode, signal };
+        send({ type: "exited", exitCode, signal } satisfies WorkerEvent);
+      });
     } finally {
       closeSync(output);
     }

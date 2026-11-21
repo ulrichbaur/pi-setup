@@ -7,19 +7,23 @@ import {
 import { Type } from "typebox";
 import { loadShortcut } from "./config.ts";
 import { watchTaskFooter } from "./footer.ts";
-import { createTaskNotices } from "./notices.ts";
+import { sendTaskNotice } from "./notices.ts";
+import { JobRegistry } from "./registry.ts";
 import {
   DEFAULT_TIMEOUT_MS,
+  type Job,
   jobDir,
   MAX_TIMER_MS,
-  startJob,
+  sessionDir,
 } from "./runner.ts";
 import { taskStatus } from "./status.ts";
 import { STOP_WAIT_MS, stopTask, stopText } from "./stop.ts";
 import {
   displayJobId,
   findTask,
+  interruptedTasks,
   JOB_ID_PREFIX,
+  markNoticeSent,
   sessionTasks,
   terminalText,
 } from "./task-store.ts";
@@ -28,11 +32,12 @@ import { TaskView, taskStatusLabel } from "./task-view.ts";
 const storageRoot = () => join(getAgentDir(), "background-tasks");
 
 export default async function backgroundTasks(pi: ExtensionAPI): Promise<void> {
+  const registry = new JobRegistry();
   pi.registerTool({
     name: "task_start",
     label: "Background task",
     description:
-      "Submit a non-interactive /bin/sh command that can outlive the Pi process. Returns a job ID and output log path without waiting for the command to finish. Requires a saved session.",
+      "Submit a non-interactive /bin/sh command to run in the background. Returns a job ID and output log path without waiting for the command to finish. The job stops when Pi exits or the session closes. Requires a saved session.",
     promptSnippet:
       "Start a shell command in the background and return its log path",
     parameters: Type.Object(
@@ -65,12 +70,12 @@ export default async function backgroundTasks(pi: ExtensionAPI): Promise<void> {
         throw new Error("Background task launch was cancelled");
       if (!ctx.sessionManager.getSessionFile()) {
         throw new Error(
-          "Background tasks require a saved Pi session so you can recover the job after Pi exits.",
+          "Background tasks require a saved Pi session, which keeps the job's history and log.",
         );
       }
       const root = storageRoot();
       const sessionId = ctx.sessionManager.getSessionId();
-      const job = await startJob(root, sessionId, {
+      const { job } = await registry.start(root, sessionId, {
         command: params.command,
         label: params.label,
         cwd: params.cwd ? resolve(ctx.cwd, params.cwd) : ctx.cwd,
@@ -108,6 +113,7 @@ export default async function backgroundTasks(pi: ExtensionAPI): Promise<void> {
         throw new Error("Background tasks require a saved Pi session.");
       }
       const outcome = await stopTask(
+        registry,
         storageRoot(),
         ctx.sessionManager.getSessionId(),
         params.jobId,
@@ -187,7 +193,16 @@ export default async function backgroundTasks(pi: ExtensionAPI): Promise<void> {
       }
       await ctx.ui.custom<void>(
         (tui, theme, keys, done) => {
-          view = new TaskView(tui, theme, keys, done, load, snapshot, id);
+          view = new TaskView(
+            tui,
+            theme,
+            keys,
+            done,
+            load,
+            (jobId) => registry.stop(jobId),
+            snapshot,
+            id,
+          );
           return view;
         },
         {
@@ -237,22 +252,70 @@ export default async function backgroundTasks(pi: ExtensionAPI): Promise<void> {
     handler: openTasks,
   });
 
-  let disposeFooter: (() => void) | undefined;
+  // Each notice names the job by its shortest unique ID prefix.
+  async function announce(
+    rows: Awaited<ReturnType<typeof sessionTasks>>["rows"],
+    sessionId: string,
+    triggerTurn: boolean,
+  ): Promise<void> {
+    const snapshot = await sessionTasks(storageRoot(), sessionId);
+    sendTaskNotice(
+      pi,
+      rows.map((row) => ({ row, shortId: displayJobId(row.job.id, snapshot) })),
+      triggerTurn,
+    );
+  }
+
+  let disposers: Array<() => void> = [];
   pi.on("session_start", (_event, ctx) => {
-    disposeFooter?.();
-    completionSession =
-      ctx.mode === "tui"
-        ? { id: ctx.sessionManager.getSessionId() }
-        : undefined;
-    disposeFooter =
-      ctx.mode === "tui"
-        ? watchTaskFooter(ctx, storageRoot(), createTaskNotices(pi, Date.now()))
-        : undefined;
+    for (const dispose of disposers) dispose();
+    disposers = [];
+    const sessionId = ctx.sessionManager.getSessionId();
+    completionSession = ctx.mode === "tui" ? { id: sessionId } : undefined;
+    const root = storageRoot();
+    // Any session's jobs are owned by this process, so only a TUI session
+    // announces what ends, and only its own jobs.
+    if (ctx.mode === "tui") {
+      disposers.push(watchTaskFooter(ctx.ui, registry));
+      const own = sessionDir(root, sessionId);
+      disposers.push(
+        registry.subscribe((job: Job, dir: string) => {
+          if (!job.finishedAt || !dir.startsWith(own)) return;
+          const row = { job, state: job.state, dir };
+          // A stop was requested on purpose, so it does not wake the agent.
+          void announce([row], sessionId, job.state !== "stopped").catch(
+            (error: unknown) =>
+              ctx.ui.notify(
+                `Background task notice failed: ${terminalText(String(error))}`,
+                "error",
+              ),
+          );
+        }),
+      );
+    }
+    void interruptedTasks(root, sessionId, (id) => registry.owns(id))
+      .then(async ({ rows, errors }) => {
+        for (const error of errors)
+          ctx.ui.notify(
+            `Background task record unavailable: ${terminalText(error)}`,
+            "warning",
+          );
+        if (ctx.mode !== "tui" || !rows.length) return;
+        await announce(rows, sessionId, false);
+        for (const row of rows) markNoticeSent(row);
+      })
+      .catch((error: unknown) =>
+        ctx.ui.notify(
+          `Could not check for interrupted background tasks: ${terminalText(String(error))}`,
+          "error",
+        ),
+      );
   });
   pi.on("session_shutdown", () => {
     completionSession = undefined;
-    disposeFooter?.();
-    disposeFooter = undefined;
+    for (const dispose of disposers) dispose();
+    disposers = [];
+    registry.stopAll();
   });
 
   try {

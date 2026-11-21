@@ -13,7 +13,6 @@ import {
 } from "@earendil-works/pi-tui";
 import { findLogMatch } from "./log-search.ts";
 import { LogViewport } from "./log-viewport.ts";
-import { stopJob } from "./runner.ts";
 import {
   active,
   displayJobId,
@@ -39,8 +38,8 @@ export function taskStatusLabel({ state, job }: TaskRow): string {
       return `Stopped${result ? ` (${result})` : ""}`;
     case "timed_out":
       return `Timed out${result ? ` (${result})` : ""}`;
-    case "unknown":
-      return "Status unknown";
+    case "interrupted":
+      return "Interrupted when Pi closed";
     default:
       return state[0].toUpperCase() + state.slice(1);
   }
@@ -90,6 +89,7 @@ export class TaskView {
   private readonly keys: KeybindingsManager;
   private readonly done: () => void;
   private readonly load: () => Promise<Snapshot>;
+  private readonly stopJob: (id: string) => boolean;
 
   constructor(
     tui: TUI,
@@ -97,6 +97,7 @@ export class TaskView {
     keys: KeybindingsManager,
     done: () => void,
     load: () => Promise<Snapshot>,
+    stopJob: (id: string) => boolean,
     snapshot: Snapshot,
     jobId?: string,
   ) {
@@ -105,6 +106,7 @@ export class TaskView {
     this.keys = keys;
     this.done = done;
     this.load = load;
+    this.stopJob = stopJob;
     this.snapshot = snapshot;
     this.selected = snapshot.rows[0]?.job.id;
     if (jobId) this.open(jobId);
@@ -190,9 +192,9 @@ export class TaskView {
     if (this.stopBusy || !canStop(row)) return;
     this.stopBusy = true;
     try {
-      this.error = (await stopJob(row.dir))
+      this.error = this.stopJob(row.job.id)
         ? undefined
-        : "Stop not accepted. The job may have already ended.";
+        : "Stop not accepted. The job has ended or runs in another Pi process.";
       await this.refresh();
     } catch (error) {
       this.error = String(error);
@@ -372,11 +374,7 @@ export class TaskView {
     );
     let group = "";
     for (const row of rows.slice(start, start + height)) {
-      const next = active(row)
-        ? "Active"
-        : row.state === "unknown"
-          ? "Status unknown"
-          : "History";
+      const next = active(row) ? "Active" : "History";
       if (next !== group) lines.push(this.theme.fg("muted", next));
       group = next;
       const selected = row.job.id === this.selected;

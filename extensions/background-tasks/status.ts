@@ -39,12 +39,7 @@ export function jobStatus(
   now: number,
 ): JobStatus {
   const startedAt = job.startedAt ? Date.parse(job.startedAt) : undefined;
-  // The end of an unreachable job is not known.
-  const endedAt = job.finishedAt
-    ? Date.parse(job.finishedAt)
-    : state === "unknown"
-      ? undefined
-      : now;
+  const endedAt = job.finishedAt ? Date.parse(job.finishedAt) : now;
   const finished = Boolean(job.finishedAt);
   return {
     jobId: job.id,
@@ -54,10 +49,9 @@ export function jobStatus(
     ...(finished && job.exitCode != null && { exitCode: job.exitCode }),
     ...(finished && job.signal && { signal: job.signal }),
     ...(finished && job.error && { error: terminalText(job.error) }),
-    ...(startedAt !== undefined &&
-      endedAt !== undefined && {
-        elapsedMs: Math.max(0, endedAt - startedAt),
-      }),
+    ...(startedAt !== undefined && {
+      elapsedMs: Math.max(0, endedAt - startedAt),
+    }),
     timeoutMs: job.timeoutMs,
     logPath: join(dir, "output.log"),
   };

@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { JobRegistry } from "../../../extensions/background-tasks/registry.ts";
 import {
   jobDir,
   readJob,
@@ -12,7 +13,7 @@ import { withTempDir } from "../../helpers.ts";
 import { record, running, session, until } from "./fake-jobs.ts";
 
 const FINISHED = "aaaaaaaa-0000-4000-8000-000000000001";
-const UNKNOWN = "bbbbbbbb-0000-4000-8000-000000000002";
+const RUNNING = "bbbbbbbb-0000-4000-8000-000000000002";
 const BROKEN = "cccccccc-0000-4000-8000-000000000003";
 
 test("an empty session has no jobs", async () => {
@@ -33,12 +34,12 @@ test("the list shows each job without output, unreadable records last", async ()
       startedAt: "2026-01-01T00:00:00.000Z",
       finishedAt: "2026-01-01T00:00:41.210Z",
     });
-    record(root, UNKNOWN, { startedAt: "2026-01-01T00:00:00.000Z" });
+    record(root, RUNNING, { startedAt: "2026-01-01T00:00:00.000Z" });
     const broken = jobDir(root, session, BROKEN);
     mkdirSync(broken);
     writeFileSync(join(broken, "job.json"), "{ broken");
 
-    const [unknown, finished, unreadable, ...rest] = await taskStatus(
+    const [live, finished, unreadable, ...rest] = await taskStatus(
       root,
       session,
     );
@@ -53,10 +54,10 @@ test("the list shows each job without output, unreadable records last", async ()
       timeoutMs: 1_800_000,
       logPath: join(finishedDir, "output.log"),
     });
-    // The end of an unreachable job is unknown, so it has no elapsed time.
-    assert.equal(unknown.jobId, UNKNOWN);
-    assert.equal(unknown.state, "unknown");
-    assert.equal(unknown.elapsedMs, undefined);
+    // A running job's elapsed time runs to now.
+    assert.equal(live.jobId, RUNNING);
+    assert.equal(live.state, "running");
+    assert.ok((live.elapsedMs ?? 0) > 41_210);
     assert.equal(unreadable.jobId, BROKEN);
     assert.equal(unreadable.state, "unreadable");
     assert.match(unreadable.error ?? "", /JSON/);
@@ -109,6 +110,7 @@ test("a running job reports a growing elapsed time, then its exit", {
 }, async () => {
   await withTempDir("pi-bg-status-", async (root) => {
     const dir = await running(
+      new JobRegistry(),
       root,
       "printf 'started\\n'; while [ ! -e done ]; do sleep 0.05; done",
     );

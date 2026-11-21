@@ -1,16 +1,6 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { createConnection } from "node:net";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   DEFAULT_TIMEOUT_MS,
@@ -26,7 +16,9 @@ export type JobState =
   | "exited"
   | "failed"
   | "stopped"
-  | "timed_out";
+  | "timed_out"
+  // Pi ended before it recorded the job's end.
+  | "interrupted";
 
 export interface JobSpec {
   command: string;
@@ -42,14 +34,16 @@ export interface Job {
   cwd: string;
   label?: string;
   timeoutMs: number | null;
-  socketPath: string;
   createdAt: string;
   state: JobState;
+  workerPid?: number;
   startedAt?: string;
   finishedAt?: string;
   exitCode?: number | null;
   signal?: NodeJS.Signals | null;
   error?: string;
+  // Set once Pi has announced an interrupted job.
+  noticeSent?: boolean;
 }
 
 export function readJob(dir: string): Job {
@@ -83,11 +77,12 @@ export function jobDir(root: string, sessionId: string, id: string): string {
   return join(sessionDir(root, sessionId), id);
 }
 
-export async function startJob(
+/** Validates the spec and writes the record of a job that has not started. */
+export function createJob(
   root: string,
   sessionId: string,
   spec: JobSpec,
-): Promise<Job> {
+): { job: Job; dir: string } {
   if (process.platform === "win32")
     throw new Error("Background jobs require a Unix-like OS");
   if (!sessionId || !spec.command.trim() || !isAbsolute(spec.cwd)) {
@@ -105,86 +100,17 @@ export async function startJob(
       `timeoutMs must be null or an integer between 1 and ${MAX_TIMER_MS}`,
     );
   }
-
   const id = randomUUID();
   const dir = jobDir(root, sessionId, id);
   mkdirSync(sessionDir(root, sessionId), { recursive: true, mode: 0o700 });
   mkdirSync(dir, { mode: 0o700 });
-  // Unix sockets have a short path limit, even when the state directory does not.
-  const controlDir = mkdtempSync("/tmp/pi-bg-");
   const job: Job = {
     ...spec,
     id,
     timeoutMs,
-    socketPath: join(controlDir, "control.sock"),
     state: "starting",
     createdAt: new Date().toISOString(),
   };
-  try {
-    saveJob(dir, job);
-    const child = spawn(
-      process.execPath,
-      [
-        "--experimental-strip-types",
-        fileURLToPath(new URL("./supervisor.ts", import.meta.url)),
-        dir,
-      ],
-      { detached: true, stdio: "ignore" },
-    );
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
-    });
-    child.unref();
-    return job;
-  } catch (error) {
-    rmSync(controlDir, { recursive: true, force: true });
-    saveJob(dir, {
-      ...job,
-      state: "failed",
-      finishedAt: new Date().toISOString(),
-      error: String(error),
-    });
-    throw error;
-  }
-}
-
-function request(job: Job, action: "status" | "stop"): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection(job.socketPath);
-    const timer = setTimeout(() => finish(false), 500);
-    let reply = "";
-    function finish(ok: boolean) {
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(ok);
-    }
-    socket.setEncoding("utf8");
-    socket.on("connect", () => socket.end(`${job.id} ${action}\n`));
-    socket.on("data", (chunk: string) => {
-      reply += chunk;
-      if (reply.length > 64) finish(false);
-    });
-    socket.on("close", () => finish(reply === `${job.id} ok\n`));
-    socket.on("error", () => finish(false));
-  });
-}
-
-export async function inspectJob(
-  dir: string,
-): Promise<{ job: Job; state: JobState | "unknown" }> {
-  const job = readJob(dir);
-  if (job.finishedAt) return { job, state: job.state };
-  const reachable = await request(job, "status");
-  const latest = readJob(dir);
-  return {
-    job: latest,
-    state: reachable || latest.finishedAt ? latest.state : "unknown",
-  };
-}
-
-/** Returns true only if the live supervisor accepted the stop request. */
-export async function stopJob(dir: string): Promise<boolean> {
-  const job = readJob(dir);
-  return !job.finishedAt && request(job, "stop");
+  saveJob(dir, job);
+  return { job, dir };
 }

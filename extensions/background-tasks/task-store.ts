@@ -1,11 +1,21 @@
+import { statSync } from "node:fs";
 import { type FileHandle, open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { inspectJob, isJobId, sessionDir } from "./runner.ts";
+import {
+  isJobId,
+  type Job,
+  type JobState,
+  readJob,
+  saveJob,
+  sessionDir,
+} from "./runner.ts";
 
-export type TaskRow = Awaited<ReturnType<typeof inspectJob>> & {
+export interface TaskRow {
+  job: Job;
+  state: JobState;
   dir: string;
-};
+}
 
 function missing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === "ENOENT";
@@ -38,18 +48,16 @@ export async function sessionTasks(
       .map(async (entry) => {
         const dir = join(directory, entry.name);
         try {
-          const result = await inspectJob(dir);
-          rows.push({ ...result, dir });
+          const job = readJob(dir);
+          rows.push({ job, state: job.state, dir });
         } catch (error) {
           errors.push(`${entry.name}: ${String(error)}`);
         }
       }),
   );
-  const rank = (row: TaskRow) =>
-    active(row) ? 0 : row.state === "unknown" ? 1 : 2;
   rows.sort(
     (a, b) =>
-      rank(a) - rank(b) ||
+      Number(active(b)) - Number(active(a)) ||
       (b.job.finishedAt ?? b.job.createdAt).localeCompare(
         a.job.finishedAt ?? a.job.createdAt,
       ) ||
@@ -76,6 +84,63 @@ export function findTask(
       ? terminalText(unreadable[0])
       : "No such background job in this session",
   };
+}
+
+function workerAlive(pid: number | undefined): boolean {
+  if (pid === undefined) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** When the job last wrote output, or when its record last changed. */
+function lastActivity(dir: string): string {
+  for (const name of ["output.log", "job.json"]) {
+    try {
+      return statSync(join(dir, name)).mtime.toISOString();
+    } catch {
+      // Try the next file.
+    }
+  }
+  return new Date().toISOString();
+}
+
+/**
+ * Marks jobs that Pi never saw end as interrupted, and returns the
+ * interrupted jobs not yet announced. A job is left alone while this Pi owns
+ * it or its worker still runs, since that worker records the end itself.
+ */
+export async function interruptedTasks(
+  root: string,
+  sessionId: string,
+  owns: (id: string) => boolean,
+): Promise<{ rows: TaskRow[]; errors: string[] }> {
+  const snapshot = await sessionTasks(root, sessionId);
+  const rows: TaskRow[] = [];
+  const errors = [...snapshot.errors];
+  for (const row of snapshot.rows) {
+    const { job, dir } = row;
+    if (!job.finishedAt && !owns(job.id) && !workerAlive(job.workerPid)) {
+      row.job = { ...job, state: "interrupted", finishedAt: lastActivity(dir) };
+      row.state = "interrupted";
+      try {
+        saveJob(dir, row.job);
+      } catch (error) {
+        errors.push(`${job.id}: ${String(error)}`);
+        continue;
+      }
+    }
+    if (row.state === "interrupted" && !row.job.noticeSent) rows.push(row);
+  }
+  return { rows, errors };
+}
+
+export function markNoticeSent(row: TaskRow): void {
+  row.job = { ...row.job, noticeSent: true };
+  saveJob(row.dir, row.job);
 }
 
 export function displayJobId(

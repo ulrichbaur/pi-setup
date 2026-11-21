@@ -1,11 +1,10 @@
-import { setTimeout as delay } from "node:timers/promises";
-import { type Job, readJob, stopJob } from "./runner.ts";
+import type { JobRegistry } from "./registry.ts";
+import { type Job, readJob } from "./runner.ts";
 import { exitText } from "./status.ts";
 import { findTask, JOB_ID_PREFIX, sessionTasks } from "./task-store.ts";
 
 /** Covers the worker's grace period before it sends SIGKILL, plus a margin. */
 export const STOP_WAIT_MS = 7_000;
-const POLL_MS = 200;
 
 export interface StopOutcome {
   job: Job;
@@ -28,6 +27,7 @@ export function stopText({ job, alreadyEnded }: StopOutcome): string {
  * An abort of `signal` ends the wait, not the stop.
  */
 export async function stopTask(
+  registry: JobRegistry,
   root: string,
   sessionId: string,
   jobId: string,
@@ -40,23 +40,14 @@ export async function stopTask(
   if ("error" in found) throw new Error(found.error);
   const { row } = found;
   if (row.job.finishedAt) return { job: row.job, alreadyEnded: true };
-  if (row.state === "unknown") {
-    throw new Error(
-      `Could not reach the supervisor of background job ${row.job.id}. Its state is unknown.`,
-    );
-  }
-  if (!(await stopJob(row.dir))) {
+  const { id } = row.job;
+  const ended = registry.waitForEnd(id, waitMs, signal);
+  if (!registry.stop(id)) {
     const job = readJob(row.dir);
     if (job.finishedAt) return { job, alreadyEnded: false };
     throw new Error(
-      `Background job ${row.job.id} did not accept the stop request.`,
+      `Background job ${id} is not running in this Pi process, so it cannot be stopped here.`,
     );
   }
-  const deadline = Date.now() + waitMs;
-  let job = readJob(row.dir);
-  while (!job.finishedAt && Date.now() < deadline && !signal?.aborted) {
-    await delay(Math.min(POLL_MS, deadline - Date.now()));
-    job = readJob(row.dir);
-  }
-  return { job, alreadyEnded: false };
+  return { job: (await ended) ?? readJob(row.dir), alreadyEnded: false };
 }

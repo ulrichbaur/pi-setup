@@ -1,70 +1,28 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { active, sessionTasks, type TaskRow } from "./task-store.ts";
+import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { JobRegistry } from "./registry.ts";
 
 const KEY = "background-tasks";
 
-export function taskSummary(rows: TaskRow[]): string | undefined {
-  let running = 0;
-  let unknown = 0;
-  for (const row of rows) {
-    if (active(row)) running++;
-    if (row.state === "unknown") unknown++;
-  }
-  const parts = [];
-  if (running) parts.push(`${running} running`);
-  if (unknown) parts.push(`${unknown} unknown`);
-  return parts.length ? parts.join(" · ") : undefined;
-}
-
-/** The footer status, or undefined when there is nothing to show. */
-export function footerText(
-  rows: TaskRow[],
-  errors: string[],
-  noticesOk: boolean,
-): string | undefined {
-  const parts = [
-    taskSummary(rows),
-    errors.length ? "some unavailable" : undefined,
-    noticesOk ? undefined : "notices unavailable",
-  ].filter(Boolean);
-  return parts.length ? `Tasks: ${parts.join(" · ")}` : undefined;
+/** The footer status, or undefined when no job runs. */
+export function footerText(running: number): string | undefined {
+  return running ? `Tasks: ${running} running` : undefined;
 }
 
 export function watchTaskFooter(
-  ctx: ExtensionContext,
-  root: string,
-  publishNotices: (rows: TaskRow[], errors: string[]) => boolean,
+  ui: Pick<ExtensionUIContext, "setStatus">,
+  registry: JobRegistry,
 ): () => void {
-  const sessionId = ctx.sessionManager.getSessionId();
-  let closed = false;
-  let updating = false;
   let previous: string | undefined;
-
-  async function refresh(): Promise<void> {
-    if (closed || updating) return;
-    updating = true;
-    let text: string | undefined;
-    try {
-      const { rows, errors } = await sessionTasks(root, sessionId);
-      if (closed) return;
-      text = footerText(rows, errors, publishNotices(rows, errors));
-    } catch {
-      text = "Tasks: unavailable";
-    } finally {
-      updating = false;
-    }
-    if (!closed && previous !== text) {
-      previous = text;
-      ctx.ui.setStatus(KEY, text);
-    }
-  }
-
-  const timer = setInterval(() => void refresh(), 1_000);
-  timer.unref();
-  void refresh();
+  const refresh = () => {
+    const text = footerText(registry.active().length);
+    if (text === previous) return;
+    previous = text;
+    ui.setStatus(KEY, text);
+  };
+  const unsubscribe = registry.subscribe(refresh);
+  refresh();
   return () => {
-    closed = true;
-    clearInterval(timer);
-    if (previous !== undefined) ctx.ui.setStatus(KEY, undefined);
+    unsubscribe();
+    if (previous !== undefined) ui.setStatus(KEY, undefined);
   };
 }

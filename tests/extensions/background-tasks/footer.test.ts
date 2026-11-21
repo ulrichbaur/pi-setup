@@ -1,64 +1,45 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { footerText } from "../../../extensions/background-tasks/footer.ts";
-import type { JobState } from "../../../extensions/background-tasks/runner.ts";
-import type { TaskRow } from "../../../extensions/background-tasks/task-store.ts";
+import {
+  footerText,
+  watchTaskFooter,
+} from "../../../extensions/background-tasks/footer.ts";
+import type {
+  JobListener,
+  JobRegistry,
+} from "../../../extensions/background-tasks/registry.ts";
+import type { Job } from "../../../extensions/background-tasks/runner.ts";
 
-function row(
-  state: JobState | "unknown",
-  fields: { exitCode?: number; finished?: boolean } = {},
-): TaskRow {
-  return {
-    state,
-    dir: "/jobs/x",
-    job: {
-      id: "00112233-4455-6677-8899-aabbccddeeff",
-      command: "true",
-      cwd: "/",
-      timeoutMs: null,
-      socketPath: "/tmp/x.sock",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      state: state === "unknown" ? "running" : state,
-      ...(fields.finished && { finishedAt: "2026-01-01T00:01:00.000Z" }),
-      ...(fields.exitCode !== undefined && { exitCode: fields.exitCode }),
+test("the footer status is labeled and counts running jobs", () => {
+  assert.equal(footerText(2), "Tasks: 2 running");
+  assert.equal(footerText(0), undefined);
+});
+
+test("the footer follows the registry and clears when disposed", () => {
+  const jobs: Job[] = [];
+  const listeners = new Set<JobListener>();
+  const registry = {
+    active: () => jobs,
+    subscribe: (listener: JobListener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
-  };
-}
-
-test("the footer status is labeled and counts only current jobs", () => {
-  assert.equal(
-    footerText(
-      [
-        row("running"),
-        row("exited", { finished: true, exitCode: 2 }),
-        row("exited", { finished: true, exitCode: 0 }),
-        row("unknown"),
-      ],
-      [],
-      true,
-    ),
-    "Tasks: 1 running · 1 unknown",
+  } as unknown as JobRegistry;
+  const statuses: Array<[string, string | undefined]> = [];
+  const dispose = watchTaskFooter(
+    { setStatus: (key, text) => statuses.push([key, text]) },
+    registry,
   );
-});
+  // Nothing runs, so the footer sets no status.
+  assert.deepEqual(statuses, []);
 
-test("unavailable jobs and notices are named without repeating the label", () => {
-  assert.equal(
-    footerText([row("running")], ["x: broken"], false),
-    "Tasks: 1 running · some unavailable · notices unavailable",
-  );
-  assert.equal(footerText([], ["x: broken"], true), "Tasks: some unavailable");
-});
+  jobs.push({ id: "a" } as Job);
+  for (const listener of listeners) listener(jobs[0], "/jobs/a");
+  for (const listener of listeners) listener(jobs[0], "/jobs/a");
+  assert.deepEqual(statuses.at(-1), ["background-tasks", "Tasks: 1 running"]);
+  assert.equal(statuses.length, 1);
 
-test("finished jobs alone show no status", () => {
-  assert.equal(
-    footerText(
-      [
-        row("exited", { finished: true, exitCode: 0 }),
-        row("exited", { finished: true, exitCode: 2 }),
-      ],
-      [],
-      true,
-    ),
-    undefined,
-  );
+  dispose();
+  assert.equal(listeners.size, 0);
+  assert.deepEqual(statuses.at(-1), ["background-tasks", undefined]);
 });

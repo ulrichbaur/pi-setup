@@ -5,16 +5,20 @@ import { test } from "node:test";
 import {
   type Job,
   jobDir,
+  readJob,
   saveJob,
 } from "../../../extensions/background-tasks/runner.ts";
 import {
+  interruptedTasks,
   LOG_PAGE_BYTES,
   LogLineIndex,
+  markNoticeSent,
   readLogPage,
   sessionTasks,
   terminalText,
 } from "../../../extensions/background-tasks/task-store.ts";
 import { withTempDir } from "../../helpers.ts";
+import { record, session } from "./fake-jobs.ts";
 
 const id = "00112233-4455-6677-8899-aabbccddeeff";
 const owner = "10112233-4455-6677-8899-aabbccddeeff";
@@ -31,7 +35,6 @@ test("a session lists only its own jobs", async () => {
       timeoutMs: null,
       state: "exited",
       exitCode: 1,
-      socketPath: "",
       createdAt: "2026-01-01T00:00:00Z",
       finishedAt: "2026-01-01T00:00:03Z",
     };
@@ -73,6 +76,54 @@ test("large logs can be paged backward and forward, and terminal controls are st
     assert.equal(
       terminalText("\u001b[31mred\u001b[0m\ttext\r\u0007"),
       "red    text",
+    );
+  });
+});
+
+test("jobs Pi never saw end become interrupted and are announced once", async () => {
+  await withTempDir("background-interrupted-", async (root) => {
+    const ids = {
+      lost: "aaaaaaaa-0000-4000-8000-000000000001",
+      owned: "bbbbbbbb-0000-4000-8000-000000000002",
+      workerAlive: "cccccccc-0000-4000-8000-000000000003",
+      byWorker: "dddddddd-0000-4000-8000-000000000004",
+      announced: "eeeeeeee-0000-4000-8000-000000000005",
+      finished: "ffffffff-0000-4000-8000-000000000006",
+    };
+    const lost = record(root, ids.lost, { startedAt: "2026-01-01" });
+    await writeFile(join(lost, "output.log"), "partial\n");
+    record(root, ids.owned, {});
+    record(root, ids.workerAlive, { workerPid: process.pid });
+    const ended = { finishedAt: "2026-01-02T00:00:00.000Z" };
+    record(root, ids.byWorker, { state: "interrupted", ...ended });
+    record(root, ids.announced, {
+      state: "interrupted",
+      noticeSent: true,
+      ...ended,
+    });
+    record(root, ids.finished, { state: "exited", exitCode: 0, ...ended });
+
+    const owns = (jobId: string) => jobId === ids.owned;
+    const { rows, errors } = await interruptedTasks(root, session, owns);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(rows.map((row) => row.job.id).sort(), [
+      ids.lost,
+      ids.byWorker,
+    ]);
+    // A lost job ends at its last output.
+    const saved = readJob(lost);
+    assert.equal(saved.state, "interrupted");
+    assert.ok(Date.now() - Date.parse(saved.finishedAt ?? "") < 60_000);
+    // Jobs that may still end on their own stay as they are.
+    for (const id of [ids.owned, ids.workerAlive]) {
+      assert.equal(readJob(jobDir(root, session, id)).finishedAt, undefined);
+    }
+
+    for (const row of rows) markNoticeSent(row);
+    const again = await interruptedTasks(root, session, owns);
+    assert.deepEqual(
+      again.rows.map((row) => row.job.id),
+      [],
     );
   });
 });

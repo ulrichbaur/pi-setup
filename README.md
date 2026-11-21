@@ -183,7 +183,11 @@ Responses and the output the model sees have explicit size limits.
 ### Background tasks
 
 `task_start` runs a shell command in the background and returns its log path.
-Jobs and their logs survive closing Pi. Resume the same session to see them.
+A job runs as long as Pi does. Quitting Pi, `/reload`, or switching sessions stops it.
+If Pi crashes, the job's own worker process stops it.
+Finished jobs and their logs stay in the session's history.
+A job that Pi's close cut short shows as interrupted when you resume the session.
+The same session open in two Pi windows is not supported: each window can stop only its own jobs.
 The default timeout is 30 minutes. Set `timeoutMs` to `0` for jobs that should run until stopped.
 `task_status` lists the jobs of the current session, or shows one job with the last 20 lines of its log.
 `task_stop` stops a job of the current session by job ID or unique prefix.
@@ -202,11 +206,10 @@ Use `/tasks <id>` to open a job directly. The popup and notices show a five-char
 The footer counts running jobs after a `Tasks:` label.
 
 In the terminal UI, a job completion reaches an active agent before its next model call or wakes an idle agent.
-Manual stops and completions missed while Pi was closed show a notice without starting a turn.
+Requested stops, and jobs interrupted when Pi closed, show a notice without starting a turn.
 RPC, print, and JSON modes save results without waking the agent.
 
-Notice delivery is best effort. Pi marks a notice before handing it off for delivery to avoid duplicates.
-If Pi exits before delivering it, the notice may not replay on reopen.
+Notice delivery is best effort. If Pi exits before it delivers a completion notice, the notice is lost.
 The result and log remain available in `/tasks`.
 
 To change the shortcut, put `{"shortcut":"alt+shift+t"}` in `background-tasks.json` in Pi’s agent directory.

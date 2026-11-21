@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -7,8 +8,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import {
   DEFAULT_TIMEOUT_MS,
-  inspectJob,
   jobDir,
+  readJob,
 } from "../../../extensions/background-tasks/runner.ts";
 import { withTempDir } from "../../helpers.ts";
 import { startFakeModel, text } from "../../tui/fake-model.ts";
@@ -21,7 +22,7 @@ const piCli = join(
 );
 const extension = join(repo, "extensions/background-tasks/index.ts");
 
-test("Pi submits a job, closes before it finishes, and recovers its log on resume", {
+test("a job stops with Pi, ends as interrupted, and keeps its log for a resume", {
   skip: process.platform === "win32",
   timeout: 20_000,
 }, async () => {
@@ -40,8 +41,7 @@ test("Pi submits a job, closes before it finishes, and recovers its log on resum
         return {
           tool: "task_start",
           args: {
-            command:
-              "while [ ! -e proceed ]; do sleep 0.05; done; printf 'job output\\n'; exit 7",
+            command: "echo $$ > job.pid; printf 'job output\\n'; sleep 30",
             label: "Test job",
           },
         };
@@ -51,7 +51,13 @@ test("Pi submits a job, closes before it finishes, and recovers its log on resum
         text(last.content).includes("Submitted background job")
       ) {
         logPath = text(last.content).match(/^Output log: (.+)$/m)?.[1];
-        return { text: "Job submitted" };
+        // Pi exits after this reply, so the reply waits until the job runs.
+        return (async () => {
+          const deadline = Date.now() + 5_000;
+          while (!existsSync(join(cwd, "job.pid")) && Date.now() < deadline)
+            await delay(25);
+          return { text: "Job submitted" };
+        })();
       }
       if (last?.role === "user" && text(last.content) === resumePrompt) {
         const originalResult = messages.find(
@@ -112,13 +118,8 @@ test("Pi submits a job, closes before it finishes, and recovers its log on resum
         run.child.stdin?.end();
         return run;
       };
-      try {
-        const initial = await runPi(prompt);
-        assert.match(initial.stdout, /Job submitted/);
-      } finally {
-        // The command cannot finish until after the launching Pi has exited.
-        await writeFile(join(cwd, "proceed"), "");
-      }
+      const initial = await runPi(prompt);
+      assert.match(initial.stdout, /Job submitted/);
       assert.ok(logPath, "Pi did not return a log path");
       const files = await readdir(sessions);
       assert.equal(files.length, 1);
@@ -127,7 +128,7 @@ test("Pi submits a job, closes before it finishes, and recovers its log on resum
         (await readFile(sessionFile, "utf8")).split("\n")[0],
       );
       const dir = dirname(logPath);
-      const { job: initialJob } = await inspectJob(dir);
+      const initialJob = readJob(dir);
       assert.equal(
         dir,
         jobDir(join(agentDir, "background-tasks"), sessionId, initialJob.id),
@@ -135,14 +136,24 @@ test("Pi submits a job, closes before it finishes, and recovers its log on resum
       assert.equal(initialJob.cwd, cwd);
       assert.equal(initialJob.timeoutMs, DEFAULT_TIMEOUT_MS);
       assert.equal(initialJob.label, "Test job");
-      const deadline = Date.now() + 3_000;
-      let job = initialJob;
-      while (!job.finishedAt && Date.now() < deadline) {
+      // Pi has exited, so the job's worker records the end and stops it.
+      const shell = Number(await readFile(join(cwd, "job.pid"), "utf8"));
+      const deadline = Date.now() + 8_000;
+      const alive = () => {
+        try {
+          process.kill(shell, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      while (
+        (readJob(dir).state !== "interrupted" || alive()) &&
+        Date.now() < deadline
+      )
         await delay(25);
-        ({ job } = await inspectJob(dir));
-      }
-      assert.equal(job.state, "exited");
-      assert.equal(job.exitCode, 7);
+      assert.equal(readJob(dir).state, "interrupted");
+      assert.equal(alive(), false);
       const resumed = await runPi("--session", sessionFile, resumePrompt);
       assert.match(resumed.stdout, /job output/);
     } finally {
