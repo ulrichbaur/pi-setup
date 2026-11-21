@@ -18,6 +18,7 @@ import {
 } from "./runner.ts";
 import { taskStatus } from "./status.ts";
 import { STOP_WAIT_MS, stopTask, stopText } from "./stop.ts";
+import { taskStatusLabel } from "./task-detail.ts";
 import {
   displayJobId,
   findTask,
@@ -27,7 +28,7 @@ import {
   sessionTasks,
   terminalText,
 } from "./task-store.ts";
-import { TaskView, taskStatusLabel } from "./task-view.ts";
+import { TaskView } from "./task-view.ts";
 
 const storageRoot = () => join(getAgentDir(), "background-tasks");
 
