@@ -45,6 +45,10 @@ The subagent design is in `subagents/DESIGN.md`.
   The worker then records the end itself and stops its group.
   A job that was stopping, or still running, becomes `interrupted`.
   A shell that ended on its own keeps its exit code.
+- On `SIGTERM`, as at a system shutdown, the worker stops its group and records the end before it exits.
+  Pi may die first, and after a reboot the worker's PID may belong to another process,
+  which would otherwise keep the job "Running".
+  When Pi is still alive, it records the end itself: the shell's exit by `SIGTERM`, as a job killed from outside.
 - A send to a closed channel passes a callback.
   Without one, the error crashes the worker, which then records nothing and leaves processes behind.
 - At `session_start`, Pi reads the session's records once.

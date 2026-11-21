@@ -45,6 +45,8 @@ function run(dir: string): void {
   let group: number | undefined;
   let stopping = false;
   let released = false;
+  // Set by SIGTERM: the worker then records the end itself.
+  let terminated = false;
   let exit:
     | Pick<Extract<WorkerEvent, { type: "exited" }>, "exitCode" | "signal">
     | undefined;
@@ -69,6 +71,7 @@ function run(dir: string): void {
   }
 
   function done() {
+    if (terminated) recordEnd();
     send({ type: "stopped" }, () => process.exit(0));
   }
 
@@ -89,6 +92,13 @@ function run(dir: string): void {
     }
     done();
   }
+
+  // At a system shutdown, Pi may die before it records the end, and the
+  // worker's PID may belong to another process after the reboot.
+  process.on("SIGTERM", () => {
+    terminated = true;
+    void stop();
+  });
 
   process.on("message", (msg) => {
     if (msg === "stop") void stop();

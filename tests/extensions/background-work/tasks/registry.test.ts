@@ -258,3 +258,64 @@ test(
     });
   },
 );
+
+test(
+  "SIGTERM to the worker ends the job, which Pi records",
+  options,
+  async () => {
+    await withTempDir("pi-bg-registry-", async (root) => {
+      const registry = new JobRegistry();
+      const dir = await running(registry, root, "sleep 30");
+      const { id, workerPid } = readJob(dir);
+      assert.ok(workerPid);
+      process.kill(workerPid, "SIGTERM");
+      const job = await registry.waitForEnd(id, 8_000);
+      // Pi did not ask for this stop, so the job counts as killed from outside.
+      assert.equal(job?.state, "exited");
+      assert.equal(job?.signal, "SIGTERM");
+      assert.equal(readJob(dir).state, "exited");
+    });
+  },
+);
+
+test(
+  "at a system shutdown, the worker records the end that Pi cannot",
+  options,
+  async () => {
+    await withTempDir("pi-bg-registry-", async (root) => {
+      const owner = spawn(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "--input-type=module",
+          "-e",
+          `import { JobRegistry } from ${JSON.stringify(registryUrl)};
+        const { dir } = await new JobRegistry().start(process.argv[1], process.argv[2], {
+          cwd: process.argv[1],
+          command: "sleep 30",
+        });
+        console.log(dir);
+        setInterval(() => {}, 1_000);`,
+          root,
+          session,
+        ],
+        { stdio: ["ignore", "pipe", "inherit"] },
+      );
+      const dir = await new Promise<string>((resolve) =>
+        owner.stdout.once("data", (chunk: Buffer) =>
+          resolve(chunk.toString().trim()),
+        ),
+      );
+      await until(() => readJob(dir).state === "running");
+      const worker = readJob(dir).workerPid as number;
+      // Pi cannot react, and the worker gets SIGTERM and exits.
+      owner.kill("SIGSTOP");
+      process.kill(worker, "SIGTERM");
+      await until(() => readJob(dir).finishedAt !== undefined);
+      owner.kill("SIGKILL");
+      assert.equal(readJob(dir).state, "interrupted");
+      // Until Pi is gone, the exited worker stays a zombie.
+      await until(() => !alive(worker));
+    });
+  },
+);
