@@ -200,3 +200,31 @@ test("an old result without a session ID leaves no row and no error", () => {
   assert.deepEqual(sectionItems(sections), []);
   assert.deepEqual(completions(sections, "s"), []);
 });
+
+test("an old launch and its delivered result show as one finished row", () => {
+  const launch = fakeRun("scout-00000041", "pending").result;
+  const delivered = fakeRun("scout-00000041", "completed").result;
+  const runs = savedRuns(
+    [
+      {
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolName: "subagent",
+          details: { background: true, results: [launch] },
+        },
+      },
+      {
+        type: "custom_message",
+        customType: "subagent-result",
+        details: { results: [delivered] },
+      },
+    ],
+    "subagent-result",
+  );
+  // The registry lists runs newest first.
+  const sections = buildSections(undefined, sessionRows([...runs].reverse()));
+  assert.deepEqual(sections.active, []);
+  assert.equal(sections.subagentHistory.length, 1);
+  assert.match(itemStatus(sections.subagentHistory[0]).text, /^Completed/);
+});

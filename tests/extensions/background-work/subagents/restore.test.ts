@@ -229,3 +229,25 @@ test("saved results without a session ID are skipped", () => {
     ["scout-00000002"],
   );
 });
+
+test("a launch saved without a run ID is never restored as active", () => {
+  // Older versions saved background launches without a run ID.
+  const launch = result("scout-00000001", "pending");
+  const delivered = result("scout-00000001", "completed");
+  const runs = savedRuns(
+    [
+      toolResult("subagent", { background: true, results: [launch] }),
+      {
+        type: "custom_message",
+        customType: TYPE,
+        details: { results: [delivered] },
+      },
+    ],
+    TYPE,
+  );
+  assert.deepEqual(
+    runs.map((run) => run.result.progress.status),
+    ["interrupted", "completed"],
+  );
+  assert.ok(runs.every((run) => !run.undelivered));
+});

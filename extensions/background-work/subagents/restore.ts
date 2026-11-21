@@ -1,5 +1,5 @@
 import { isRecord } from "../../../lib/is-record.ts";
-import type { SubagentRun } from "./runs.ts";
+import { isActive, type SubagentRun } from "./runs.ts";
 import { countMessageEntries } from "./transcript.ts";
 import type { AgentResult } from "./types.ts";
 import { sessionUsage } from "./usage.ts";
@@ -139,7 +139,10 @@ export function savedRuns(
       }
     }
   }
-  for (const run of undelivered.values()) {
+  // A run read back from a saved session cannot still run in this process.
+  // That covers launches whose result never arrived, with or without a run ID.
+  for (const run of runs) {
+    if (!isActive(run)) continue;
     run.result.progress = {
       ...run.result.progress,
       status: "interrupted",

@@ -685,6 +685,32 @@ test("a session start rebuilds the list from the saved results", () => {
   );
 });
 
+test("a session start never restores a run as active", () => {
+  const { registry, handlers } = load();
+  const launch = fakeRun("scout-00000001", "pending").result;
+  handlers.session_start(
+    {},
+    {
+      sessionManager: {
+        getBranch: () => [
+          {
+            type: "message",
+            message: {
+              role: "toolResult",
+              toolName: "subagent",
+              details: { mode: "single", background: true, results: [launch] },
+            },
+          },
+        ],
+      },
+      ui: { notify: () => {} },
+    },
+  );
+  assert.equal(registry.list().length, 1);
+  // The session can be continued again.
+  assert.equal(registry.active("scout-00000001"), undefined);
+});
+
 test("a session start reports interrupted launches once, without a turn", async () => {
   const sessionId = "scout-0000abcd";
   const sessions = join(agentDir, "subagents", "sessions");
