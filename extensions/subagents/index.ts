@@ -9,9 +9,9 @@ import { AgentsOverlay } from "./agents-view.ts";
 import { loadConfig } from "./config.ts";
 import { Limiter } from "./limiter.ts";
 import { combinedText, renderDetails } from "./render.ts";
-import { resultKey, savedRuns } from "./restore.ts";
-import { RunRegistry } from "./runs.ts";
-import { pruneSessions } from "./sessions.ts";
+import { interruptedResults, resultKey, savedRuns } from "./restore.ts";
+import { isActive, RunRegistry, type SubagentRun } from "./runs.ts";
+import { findSession, pruneSessions } from "./sessions.ts";
 import { statusTool, watchSubagentStatus } from "./status.ts";
 import { stopTool } from "./stop.ts";
 import { extensionTool, type ToolServices } from "./tool.ts";
@@ -40,7 +40,7 @@ export default function subagents(
       pi.sendMessage(
         {
           customType: RESULT_MESSAGE_TYPE,
-          content: `Background subagent result:\n\n${combinedText(details)}`,
+          content: `${details.interrupted ? "Background subagent interrupted" : "Background subagent result"}:\n\n${combinedText(details)}`,
           display: true,
           details,
         },
@@ -66,7 +66,14 @@ export default function subagents(
       const container = new Container();
       container.addChild(
         new Text(
-          theme.fg("toolTitle", theme.bold("Background subagent finished")),
+          theme.fg(
+            "toolTitle",
+            theme.bold(
+              message.details?.interrupted
+                ? "Background subagent interrupted"
+                : "Background subagent finished",
+            ),
+          ),
           0,
           0,
         ),
@@ -173,6 +180,36 @@ export default function subagents(
     if (entry) branchRuns([...ctx.sessionManager.getBranch(), entry]);
   });
 
+  // Background runs stop when their session closes. Their launches in this
+  // branch have no result, so the model learns of them here, once: the
+  // saved message pairs each launch with a result.
+  const reportInterrupted = (runs: SubagentRun[]) => {
+    const live = new Set(
+      registry
+        .list()
+        .filter(isActive)
+        .map((run) => run.result.runId),
+    );
+    const results = interruptedResults(
+      runs.filter((run) => !live.has(run.result.runId)),
+      (sessionId) => findSession(sessionId) !== undefined,
+    );
+    if (!results.length) return;
+    const token = delivery.start();
+    // Sent after session_start returns, like the shell-task notices.
+    setImmediate(() =>
+      delivery.deliver(
+        token,
+        {
+          mode: results.length > 1 ? "parallel" : "single",
+          results,
+          interrupted: true,
+        },
+        { triggerTurn: false },
+      ),
+    );
+  };
+
   let pruned = false;
   pi.on("session_start", (_event, ctx) => {
     const runs = branchRuns(ctx.sessionManager.getBranch());
@@ -180,6 +217,7 @@ export default function subagents(
     if (registry.list().length === 0) {
       for (const run of runs) registry.add(run);
     }
+    reportInterrupted(runs);
     disposeStatus?.();
     disposeStatus =
       ctx.mode === "tui" ? watchSubagentStatus(registry, ctx.ui) : undefined;

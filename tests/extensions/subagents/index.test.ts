@@ -541,6 +541,60 @@ test("a session start rebuilds the list from the saved results", () => {
   );
 });
 
+test("a session start reports interrupted launches once, without a turn", async () => {
+  const sessionId = "scout-0000abcd";
+  const sessions = join(agentDir, "subagents", "sessions");
+  mkdirSync(sessions, { recursive: true });
+  writeFileSync(join(sessions, `2026-01-01_${sessionId}.jsonl`), "");
+  const launch = {
+    type: "message",
+    message: {
+      role: "toolResult",
+      toolName: "subagent",
+      details: {
+        mode: "single",
+        background: true,
+        results: [{ ...fakeRun(sessionId, "pending").result, runId: "run-1" }],
+      },
+    },
+  };
+  const start = (branch: unknown[]) => {
+    const { handlers, sent } = load();
+    handlers.session_start(
+      {},
+      {
+        sessionManager: { getBranch: () => branch },
+        ui: { notify: () => {} },
+      },
+    );
+    return sent;
+  };
+
+  const sent = start([launch]);
+  // The message follows after the handler returns.
+  assert.equal(sent.length, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sent.length, 1);
+  const [{ message, options }] = sent;
+  assert.deepEqual(options, { triggerTurn: false, deliverAs: "steer" });
+  assert.equal(message.customType, RESULT_MESSAGE_TYPE);
+  assert.match(
+    String(message.content),
+    /^Background subagent interrupted:\n\nInterrupted: .*Its subagent session scout-0000abcd is saved\./,
+  );
+  assert.match(String(message.content), /Run ID: run-1/);
+  const details = message.details as SubagentDetails;
+  assert.equal(details.interrupted, true);
+
+  // Once the message is saved, the launch has its result.
+  const again = start([
+    launch,
+    { type: "custom_message", customType: RESULT_MESSAGE_TYPE, details },
+  ]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(again.length, 0);
+});
+
 test("the subagent cost total covers saved and running runs", () => {
   const { registry, handlers, costs } = load();
   const lastCost = () => {

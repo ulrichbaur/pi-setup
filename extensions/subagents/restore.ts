@@ -34,6 +34,31 @@ function finishedRun(result: AgentResult): SubagentRun {
  * Oldest first. A background run without a delivered result
  * ended when its session closed.
  */
+/**
+ * The results to report for background launches that never delivered,
+ * because their session closed. `savedSession` tells whether the subagent's
+ * session file exists, so the run can be continued.
+ */
+export function interruptedResults(
+  runs: readonly SubagentRun[],
+  savedSession: (sessionId: string) => boolean,
+): AgentResult[] {
+  return runs
+    .filter((run) => run.undelivered)
+    .map(({ result }) => {
+      const { sessionId } = result;
+      const hint =
+        sessionId && savedSession(sessionId)
+          ? `Interrupted: Pi closed the session before this run ended. Its subagent session ${sessionId} is saved. To finish the work, call subagent with that session and a follow-up task.`
+          : "Interrupted: Pi closed the session before this run ended. No subagent session was saved, so it cannot be continued. Launch it again if you still need it.";
+      return {
+        ...result,
+        output: hint,
+        progress: { ...result.progress, lastMessage: hint },
+      };
+    });
+}
+
 export function savedRuns(
   entries: readonly unknown[],
   resultMessageType: string,

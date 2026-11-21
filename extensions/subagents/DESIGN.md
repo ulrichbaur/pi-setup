@@ -154,6 +154,11 @@
 - A session shutdown stops the background runs
   and cancels their delivery, so a late result never reaches another session.
   Their subagent sessions stay saved for a resume.
+- At `session_start`, background launches in the branch without a saved result were interrupted.
+  One message reports them, without starting a turn, and says how to continue each subagent session.
+  A run without a saved session file can only be launched again.
+  The message is sent after the handler returns.
+  Once it is saved, it pairs each launch with a result, so the next start sends nothing.
 - A run that throws becomes a failed result,
   so every run reaches a final status and the call always delivers.
 

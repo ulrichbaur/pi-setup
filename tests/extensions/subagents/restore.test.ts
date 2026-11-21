@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resultKey, savedRuns } from "../../../extensions/subagents/restore.ts";
+import {
+  interruptedResults,
+  resultKey,
+  savedRuns,
+} from "../../../extensions/subagents/restore.ts";
 import { fakeRun } from "./fake-run.ts";
 
 const TYPE = "subagent-result";
@@ -90,4 +94,47 @@ test("background continuations restore by run ID rather than session ID", () => 
       ["first", "completed", false],
     ],
   );
+});
+
+test("interrupted launches report whether their session can be continued", () => {
+  const launch = (sessionId: string, runId: string) =>
+    toolResult("subagent", {
+      background: true,
+      results: [{ ...result(sessionId, "pending"), runId }],
+    });
+  const runs = savedRuns(
+    [
+      launch("scout-00000001", "saved"),
+      launch("scout-00000002", "unsaved"),
+      launch("scout-00000003", "delivered"),
+      {
+        type: "custom_message",
+        customType: TYPE,
+        details: {
+          results: [
+            { ...result("scout-00000003", "completed"), runId: "delivered" },
+          ],
+        },
+      },
+    ],
+    TYPE,
+  );
+  const results = interruptedResults(
+    runs,
+    (sessionId) => sessionId === "scout-00000001",
+  );
+  assert.deepEqual(
+    results.map(({ runId, progress }) => [runId, progress.status]),
+    [
+      ["saved", "failed"],
+      ["unsaved", "failed"],
+    ],
+  );
+  assert.match(
+    results[0].output,
+    /Its subagent session scout-00000001 is saved\. To finish the work, call subagent with that session/,
+  );
+  assert.match(results[1].output, /No subagent session was saved/);
+  assert.equal(results[1].progress.lastMessage, results[1].output);
+  assert.equal(results[0].progress.error, "Stopped when its session closed");
 });

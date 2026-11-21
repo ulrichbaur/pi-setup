@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -55,6 +61,16 @@ const script: Script = (messages) => {
   const scenario = [...users]
     .reverse()
     .find((user) => user.includes("SCENARIO"));
+  if (scenario?.includes("resumed")) {
+    const told = messages.some((message) =>
+      text(message.content).includes("Background subagent interrupted"),
+    );
+    return {
+      text: told
+        ? "Parent knows about the interrupted run"
+        : "Parent missed the interruption",
+    };
+  }
   if (scenario?.includes("busy")) {
     if (lastText.includes("Background subagent result")) {
       const readFinished = messages.some(
@@ -91,6 +107,8 @@ const script: Script = (messages) => {
     }
     if (scenario?.includes("live"))
       return { text: "Parent waits for live run" };
+    if (scenario?.includes("interrupt"))
+      return { text: "Parent waits for the run to be interrupted" };
     if (scenario?.includes("background")) return { text: "Parent waits" };
     return {
       text: scenario?.includes("ask") ? "Parent done asking" : "Parent done",
@@ -102,7 +120,7 @@ const script: Script = (messages) => {
   if (scenario?.includes("ask")) {
     return { tool: "subagent", args: { agent: "scout", task: "TASK ask" } };
   }
-  if (scenario?.includes("live")) {
+  if (scenario?.includes("live") || scenario?.includes("interrupt")) {
     return {
       tool: "subagent",
       args: { agent: "scout", task: "TASK wait", background: true },
@@ -118,6 +136,9 @@ const script: Script = (messages) => {
 };
 
 let root = "";
+let project = "";
+let agentDir = "";
+let tmuxConfig = "";
 // The socket lives in the test's folder, so cleanup removes it too.
 let socket = "";
 let server: Server | undefined;
@@ -139,12 +160,46 @@ async function waitFor(pattern: RegExp, timeoutMs = 20_000): Promise<string> {
   throw new Error(`Timed out waiting for ${pattern}. Screen:\n${last}`);
 }
 
+/** Starts Pi in the tmux session "pi", which ends when Pi exits. */
+function startPi(...args: string[]): void {
+  // The agent directory is set inside the command, because the shell that
+  // tmux starts may set its own from the user's profile.
+  const command = [
+    "env",
+    `PI_CODING_AGENT_DIR=${agentDir}`,
+    process.execPath,
+    PI_CLI,
+    "--no-skills",
+    "--no-extensions",
+    "--extension",
+    join(REPO, "extensions/subagents/index.ts"),
+    "--extension",
+    join(REPO, "extensions/pi-statusline/index.ts"),
+    ...args,
+  ].join(" ");
+  tmux(
+    "-f",
+    tmuxConfig,
+    "new-session",
+    "-d",
+    "-s",
+    "pi",
+    "-x",
+    "120",
+    "-y",
+    "40",
+    "-c",
+    project,
+    command,
+  );
+}
+
 before(async () => {
   if (!hasTmux) return;
   root = mkdtempSync(join(tmpdir(), "pi-setup-tui-"));
   socket = join(root, "tmux.sock");
-  const agentDir = join(root, "agent");
-  const project = join(root, "project");
+  agentDir = join(root, "agent");
+  project = join(root, "project");
   mkdirSync(agentDir, { recursive: true });
   mkdirSync(project);
   writeFileSync(join(project, "notes.txt"), "a file to list\n");
@@ -178,41 +233,13 @@ before(async () => {
       quietStartup: true,
     }),
   );
-  const config = join(root, "tmux.conf");
+  tmuxConfig = join(root, "tmux.conf");
   writeFileSync(
-    config,
+    tmuxConfig,
     "set -g extended-keys on\nset -g extended-keys-format csi-u\nset -sg escape-time 0\n",
   );
 
-  // The agent directory is set inside the command, because the shell that
-  // tmux starts may set its own from the user's profile.
-  const command = [
-    "env",
-    `PI_CODING_AGENT_DIR=${agentDir}`,
-    process.execPath,
-    PI_CLI,
-    "--no-skills",
-    "--no-extensions",
-    "--extension",
-    join(REPO, "extensions/subagents/index.ts"),
-    "--extension",
-    join(REPO, "extensions/pi-statusline/index.ts"),
-  ].join(" ");
-  tmux(
-    "-f",
-    config,
-    "new-session",
-    "-d",
-    "-s",
-    "pi",
-    "-x",
-    "120",
-    "-y",
-    "40",
-    "-c",
-    project,
-    command,
-  );
+  startPi();
   await waitFor(/fake-model/);
 });
 
@@ -341,4 +368,40 @@ test("a completion steers a busy parent without dropping its tool call", {
     busyChild.resolve({ text: "Scout finished" });
     busyParent.resolve({ text: "Parent finished" });
   }
+});
+
+test("a resumed session tells the model about a run its close interrupted", {
+  skip,
+  timeout: 40_000,
+}, async () => {
+  type("SCENARIO interrupt");
+  press("Enter");
+  await waitFor(/Parent waits for the run to be interrupted/);
+  await waitFor(/Subagents: 1 running/);
+  // The child saves its session after its first model reply.
+  const sessions = join(agentDir, "subagents", "sessions");
+  const before = new Set(readdirSync(sessions));
+  const deadline = Date.now() + 10_000;
+  while (readdirSync(sessions).every((name) => before.has(name))) {
+    if (Date.now() > deadline) throw new Error("No subagent session saved");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  press("C-d");
+  const closed = Date.now() + 10_000;
+  while (
+    spawnSync("tmux", ["-S", socket, "has-session", "-t", "pi"]).status === 0
+  ) {
+    if (Date.now() > closed) throw new Error("Pi did not exit");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  startPi("--continue");
+  const resumed = await waitFor(/Background subagent interrupted/);
+  assert.match(resumed, /Stopped when its session closed/);
+  assert.match(resumed, /session\s+scout-[0-9a-f]{8}\s+is\s+saved/);
+  assert.doesNotMatch(resumed, /Parent knows about the interrupted run/);
+  type("SCENARIO resumed");
+  press("Enter");
+  await waitFor(/Parent knows about the interrupted run/);
 });

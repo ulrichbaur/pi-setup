@@ -257,6 +257,8 @@ Set `timeoutMs` at launch, or override it per entry in `tasks`. Use `0` to disab
 On timeout, the run stops and reports `timed_out` with any captured partial output.
 Foreground runs do not accept `timeoutMs`.
 Background runs stop when the session closes, and their sessions stay saved.
+When the session is opened again, one message lists the interrupted runs without starting a turn.
+For each run, it says how to continue the subagent session, or to launch the run again if no session was saved.
 
 `/agents` shows one row per subagent session, even while it runs.
 Continuing after `ask_parent` updates the same row.

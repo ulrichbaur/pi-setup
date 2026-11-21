@@ -68,6 +68,8 @@ export interface SubagentDetails {
   results: AgentResult[];
   // The results are placeholders; the real ones arrive as a message.
   background?: boolean;
+  // The runs ended without a result because their session closed.
+  interrupted?: boolean;
 }
 
 // The custom message that carries a background run's results.
