@@ -57,7 +57,7 @@ export class AgentDetail implements DetailPane {
     const run = this.run();
     if (!run) return "handled";
     if (matchesKey(data, Key.escape)) return "back";
-    if (matchesKey(data, Key.ctrl("x"))) {
+    if (matchesKey(data, "x")) {
       if (isActive(run)) {
         this.registry.stop(run);
         this.notice = { text: "Stopping this subagent…", error: false };
@@ -76,7 +76,7 @@ export class AgentDetail implements DetailPane {
   render(width: number, height: number): PaneView {
     const run = this.run();
     if (!run) return { lines: [], hint: "" };
-    const header = ` ${agentRowText(run, this.theme)}`;
+    const header = agentRowText(run, this.theme);
     let lines: string[];
     try {
       const transcript = transcriptView(
@@ -109,8 +109,8 @@ export class AgentDetail implements DetailPane {
     const hint = this.theme.fg(
       "dim",
       isActive(run)
-        ? " Read-only · PgUp/PgDn scroll · Ctrl+X stop · Esc back"
-        : " Finished: read-only · PgUp/PgDn scroll · Esc back",
+        ? "Read-only · PgUp/PgDn scroll · x stop · Esc back"
+        : "Finished: read-only · PgUp/PgDn scroll · Esc back",
     );
 
     // The header, the notice, and the hints take a row each.

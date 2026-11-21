@@ -1,11 +1,9 @@
 import { join, resolve } from "node:path";
 import {
   type ExtensionAPI,
-  type ExtensionContext,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { loadShortcut } from "./config.ts";
 import { watchTaskFooter } from "./footer.ts";
 import { sendTaskNotice } from "./notices.ts";
 import { JobRegistry } from "./registry.ts";
@@ -18,21 +16,24 @@ import {
 } from "./runner.ts";
 import { taskStatus } from "./status.ts";
 import { STOP_WAIT_MS, stopTask, stopText } from "./stop.ts";
-import { taskStatusLabel } from "./task-detail.ts";
 import {
   displayJobId,
-  findTask,
   interruptedTasks,
-  JOB_ID_PREFIX,
   markNoticeSent,
   sessionTasks,
   terminalText,
 } from "./task-store.ts";
-import { TaskView } from "./task-view.ts";
 
 const storageRoot = () => join(getAgentDir(), "background-tasks");
 
-export async function registerTasks(pi: ExtensionAPI): Promise<void> {
+/** What the background-work view needs from the task feature. */
+export interface TasksHandle {
+  registry: JobRegistry;
+  /** The directory that holds every session's job records. */
+  root: () => string;
+}
+
+export async function registerTasks(pi: ExtensionAPI): Promise<TasksHandle> {
   const registry = new JobRegistry();
   pi.registerTool({
     name: "task_start",
@@ -167,92 +168,6 @@ export async function registerTasks(pi: ExtensionAPI): Promise<void> {
     },
   });
 
-  async function openTasks(args: string, ctx: ExtensionContext): Promise<void> {
-    if (ctx.mode !== "tui") {
-      ctx.ui.notify("/tasks requires interactive mode", "error");
-      return;
-    }
-    const prefix = args.trim().toLowerCase();
-    if (prefix && !JOB_ID_PREFIX.test(prefix)) {
-      ctx.ui.notify("Usage: /tasks [job ID or unique prefix]", "error");
-      return;
-    }
-    const root = storageRoot();
-    const sessionId = ctx.sessionManager.getSessionId();
-    const load = () => sessionTasks(root, sessionId);
-    let view: TaskView | undefined;
-    try {
-      const snapshot = await load();
-      let id: string | undefined;
-      if (prefix) {
-        const found = findTask(snapshot, prefix);
-        if ("error" in found) {
-          ctx.ui.notify(found.error, "error");
-          return;
-        }
-        id = found.row.job.id;
-      }
-      await ctx.ui.custom<void>(
-        (tui, theme, keys, done) => {
-          view = new TaskView(
-            tui,
-            theme,
-            keys,
-            done,
-            load,
-            (jobId) => registry.stop(jobId),
-            snapshot,
-            id,
-          );
-          return view;
-        },
-        {
-          overlay: true,
-          overlayOptions: { anchor: "center", width: "90%", margin: 1 },
-        },
-      );
-    } catch (error) {
-      ctx.ui.notify(
-        `Could not open /tasks: ${terminalText(String(error))}`,
-        "error",
-      );
-    } finally {
-      view?.dispose();
-    }
-  }
-
-  let completionSession: { id: string } | undefined;
-  pi.registerCommand("tasks", {
-    description:
-      "View background jobs for this session, or open one by ID or unique prefix",
-    async getArgumentCompletions(input) {
-      const session = completionSession;
-      const prefix = input.trimStart().toLowerCase();
-      if (!session || !/^[0-9a-f-]{0,36}$/.test(prefix)) return null;
-      const snapshot = await sessionTasks(storageRoot(), session.id).catch(
-        () => undefined,
-      );
-      if (!snapshot || completionSession !== session) return null;
-      const items = snapshot.rows
-        .filter(({ job }) => job.id.startsWith(prefix))
-        .map((row) => {
-          const shortId = displayJobId(row.job.id, snapshot);
-          const value = row.job.id.slice(
-            0,
-            Math.max(shortId.length, prefix.length),
-          );
-          const label = terminalText(row.job.label || row.job.command);
-          return {
-            value,
-            label: value,
-            description: `${taskStatusLabel(row)} · ${label}`,
-          };
-        });
-      return items.length ? items : null;
-    },
-    handler: openTasks,
-  });
-
   // Each notice names the job by its shortest unique ID prefix.
   async function announce(
     rows: Awaited<ReturnType<typeof sessionTasks>>["rows"],
@@ -272,7 +187,6 @@ export async function registerTasks(pi: ExtensionAPI): Promise<void> {
     for (const dispose of disposers) dispose();
     disposers = [];
     const sessionId = ctx.sessionManager.getSessionId();
-    completionSession = ctx.mode === "tui" ? { id: sessionId } : undefined;
     const root = storageRoot();
     // Any session's jobs are owned by this process, so only a TUI session
     // announces what ends, and only its own jobs.
@@ -313,28 +227,10 @@ export async function registerTasks(pi: ExtensionAPI): Promise<void> {
       );
   });
   pi.on("session_shutdown", () => {
-    completionSession = undefined;
     for (const dispose of disposers) dispose();
     disposers = [];
     registry.stopAll();
   });
 
-  try {
-    const shortcut = await loadShortcut(
-      join(getAgentDir(), "background-tasks.json"),
-    );
-    if (shortcut) {
-      pi.registerShortcut(shortcut, {
-        description: "Open background tasks for this session",
-        handler: (ctx) => openTasks("", ctx),
-      });
-    }
-  } catch (error) {
-    pi.on("session_start", (_event, ctx) => {
-      ctx.ui.notify(
-        `Background task shortcut not loaded: ${terminalText(String(error))}`,
-        "error",
-      );
-    });
-  }
+  return { registry, root: storageRoot };
 }

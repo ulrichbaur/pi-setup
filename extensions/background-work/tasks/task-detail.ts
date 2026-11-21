@@ -337,7 +337,7 @@ export class TaskDetail implements DetailPane {
         : "";
       return view(
         lines,
-        this.theme.fg("dim", `c collapse command${scroll}${stop} · Esc close`),
+        this.theme.fg("dim", `c collapse command${scroll}${stop} · Esc back`),
       );
     }
     if (!page) lines.push("Loading log…");
@@ -368,7 +368,7 @@ export class TaskDetail implements DetailPane {
         ? `${this.searchDirection === 1 ? "Search: " : "Search backward: "}${this.searchInput.render(Math.max(1, width - (this.searchDirection === 1 ? 12 : 21)))[0] ?? ""}`
         : this.theme.fg(
             "dim",
-            `${expanded ? "c collapse command" : "c full command"} · ${this.viewport.wrapping ? "w unwrap" : "w wrap"} · /? search${this.searchQuery ? " · n/N match" : ""} · ↑↓ scroll · End follow${stop} · Esc close`,
+            `${expanded ? "c collapse command" : "c full command"} · ${this.viewport.wrapping ? "w unwrap" : "w wrap"} · /? search${this.searchQuery ? " · n/N match" : ""} · ↑↓ scroll · End follow${stop} · Esc back`,
           ),
     );
   }

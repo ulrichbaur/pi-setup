@@ -201,8 +201,11 @@ Pi marks the task finished when its shell exits. If the shell leaves a child run
 Pi can no longer stop it from `/tasks` or enforce the task timeout.
 If your script intentionally starts parallel workers with `&`, use `wait` to keep the shell alive until they finish.
 
-Open `/tasks` with **Alt+T**. Press Enter for output and `x` to stop a running job.
-Use `/tasks <id>` to open a job directly. The popup and notices show a five-character ID prefix, extended when needed to be unique in the session.
+Open `/tasks` with **Alt+T**. It lists shell jobs and subagents together:
+active work of both kinds first, then shell history, then subagent history.
+Press Enter for details, `x` to stop the selected job or subagent, and Escape to go back or close.
+Use `/tasks <id>` to open a job or subagent session directly. Completions name each entry's kind.
+The view and notices show a five-character job ID prefix, extended when needed to be unique in the session.
 The footer counts running jobs after a `Tasks:` label.
 
 In the terminal UI, a job completion reaches an active agent before its next model call or wakes an idle agent.
@@ -264,16 +267,16 @@ Background runs stop when the session closes, and their sessions stay saved.
 When the session is opened again, one message lists the interrupted runs without starting a turn.
 For each run, it says how to continue the subagent session, or to launch the run again if no session was saved.
 
-`/agents` shows one row per subagent session, even while it runs.
+`/tasks` shows one row per subagent session, even while it runs.
 Continuing after `ask_parent` updates the same row.
 Press Enter to inspect its continuous conversation, including earlier questions and parent answers.
 History stays visible during streaming and after completion or reload.
-PgUp/PgDn scroll, Ctrl+X stops that session's active run, and Escape returns to the list or closes it.
+PgUp/PgDn scroll, `x` stops that session's active run, and Escape returns to the list.
 Unreadable history or a session file over 10 MiB shows a warning instead of a transcript.
 There is no live steering or queued follow-up input.
 Continue a session through the parent model's `subagent` call instead.
 Each tool result shows its run's cost.
-Each `/agents` row sums its retained runs once.
+Each subagent's detail header sums its retained runs once.
 The registry retains every active run and the 50 newest finished runs.
 Session grouping does not change the overall cost total.
 
@@ -293,7 +296,8 @@ Only `scout`, `researcher`, and `analyst` may appear under `agents`.
 Malformed config and unknown agent names fail at load with the config path.
 
 Migration: rename `agents.worker` to `agents.analyst` and remove other custom-agent config entries.
-Custom agent files no longer load, and `/agents open`, `/agents back`, and Ctrl+O session switching are removed.
+Custom agent files no longer load, and `/agents`, `/agents open`, `/agents back`, and Ctrl+O session switching are removed.
+Use `/tasks` instead of `/agents`.
 No user config, agent files, or saved state are rewritten.
 Historical results and transcripts remain readable, including old editing and shell calls.
 Old worker or custom-agent sessions cannot continue because their definitions no longer exist.
@@ -329,7 +333,7 @@ git config core.hooksPath scripts/hooks
 ```
 
 `pnpm test:tui` drives the real Pi TUI in a private tmux server, against a fake local model.
-It checks subagent runs, `/agents`, and the statusline on screen, with no cost and no network.
+It checks subagent runs, `/tasks`, and the statusline on screen, with no cost and no network.
 It needs tmux and is not part of `pnpm check`.
 Its tests live in `tests/tui/` with the `.tui.ts` suffix.
 

@@ -32,7 +32,7 @@ export function sessionRows(runs: SubagentRun[]): SubagentRun[] {
       result.progress.toolCount += run.result.progress.toolCount;
       result.progress.durationMs += run.result.progress.durationMs;
     }
-    return { result, stop: latest.stop };
+    return { result, stop: latest.stop, startedAt: latest.startedAt };
   });
 }
 

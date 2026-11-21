@@ -152,6 +152,11 @@ const screen = () => tmux("capture-pane", "-p", "-t", "pi");
 const type = (value: string) => tmux("send-keys", "-t", "pi", "-l", value);
 const press = (...keys: string[]) => tmux("send-keys", "-t", "pi", ...keys);
 
+/** The subagent rows in the /tasks view, one per session. */
+function agentRows(screenText: string): number {
+  return screenText.match(/agent {2}scout-[0-9a-f]{8}/g)?.length ?? 0;
+}
+
 async function waitFor(pattern: RegExp, timeoutMs = 20_000): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   let last = "";
@@ -282,9 +287,9 @@ test("a subagent asks the parent, which resumes it with the answer", {
   assert.match(done, /continues scout-/);
   assert.match(done, /Scout chose blue/);
   assert.doesNotMatch(done, /waiting for your answer/);
-  type("/agents");
+  type("/tasks");
   press("Enter");
-  await waitFor(/Subagents \(2\)/);
+  assert.equal(agentRows(await waitFor(/Subagent history/)), 2);
   press("Enter");
   const history = await waitFor(/Finished: read-only/);
   assert.match(history, /Task: TASK ask/);
@@ -292,9 +297,9 @@ test("a subagent asks the parent, which resumes it with the answer", {
   assert.match(history, /Task: blue/);
   assert.match(history, /Scout chose blue/);
   press("Escape");
-  await waitFor(/Subagents \(2\)/);
+  await waitFor(/Subagent history/);
   press("Escape");
-  await waitFor(/^(?![\s\S]*Subagents \(2\))/);
+  await waitFor(/^(?![\s\S]*Background work)/);
 });
 
 test("a background run delivers and its transcript opens read-only", {
@@ -307,10 +312,11 @@ test("a background run delivers and its transcript opens read-only", {
   const final = await waitFor(/Parent got the result/);
   assert.match(final, /Scout found the files/);
 
-  type("/agents");
+  type("/tasks");
   press("Enter");
-  const list = await waitFor(/Subagents \(3\)/);
-  assert.match(list, /scout-\w+ · completed/);
+  const list = await waitFor(/Subagent history/);
+  assert.equal(agentRows(list), 3);
+  assert.match(list, /agent {2}scout-\w+ +Completed/);
   assert.doesNotMatch(list, /open session/);
   press("Enter");
   const detail = await waitFor(/Finished: read-only/);
@@ -321,9 +327,9 @@ test("a background run delivers and its transcript opens read-only", {
   assert.match(screen(), /Finished: read-only/);
   assert.doesNotMatch(screen(), /ignored input/);
   press("Escape");
-  await waitFor(/Subagents \(3\)/);
+  await waitFor(/Subagent history/);
   press("Escape");
-  await waitFor(/^(?![\s\S]*Subagents \(3\))/);
+  await waitFor(/^(?![\s\S]*Background work)/);
 });
 
 test("a live transcript stays read-only and the selected run can be cancelled", {
@@ -333,23 +339,24 @@ test("a live transcript stays read-only and the selected run can be cancelled", 
   press("Enter");
   await waitFor(/Parent waits for live run/);
   await waitFor(/Subagents: 1 running/);
-  type("/agents");
+  type("/tasks");
   press("Enter");
-  await waitFor(/Subagents \(4\)/);
+  // The running subagent is first, under Active.
+  assert.equal(agentRows(await waitFor(/Active/)), 4);
   press("Enter");
-  const live = await waitFor(/Read-only · PgUp\/PgDn scroll · Ctrl\+X stop/);
+  const live = await waitFor(/Read-only · PgUp\/PgDn scroll · x stop/);
   assert.match(live, /ls/);
   assert.doesNotMatch(live, /steer|follow-up|open session/);
   press("PPage");
   press("NPage");
-  press("C-x");
+  press("x");
   await waitFor(/Finished: read-only/);
   assert.match(screen(), /Stopped by the user/);
   press("Escape");
-  await waitFor(/Subagents \(4\)/);
+  await waitFor(/Subagent history/);
   press("Escape");
   // The stopped result shows in the chat, but the parent stays idle.
-  await waitFor(/^(?![\s\S]*Subagents \(4\))[\s\S]*Error: Stopped by the user/);
+  await waitFor(/^(?![\s\S]*Background work)[\s\S]*Error: Stopped by the user/);
   await new Promise((resolve) => setTimeout(resolve, 1_000));
   assert.doesNotMatch(screen(), /Parent reacted to the stop/);
 });

@@ -13,7 +13,7 @@ const theme = {
 const tui = { requestRender: () => {} } as unknown as TUI;
 const KEYS = {
   escape: "\x1b",
-  stop: "\x18",
+  stop: "x",
   pageUp: "\x1b[5~",
   pageDown: "\x1b[6~",
 };
@@ -38,14 +38,14 @@ test("the pane fits its height and scrolls by pages", () => {
   assert.equal(view.lines.length, 9);
   assert.match(view.lines[0], /scout scout-00000001 · running/);
   assert.equal(view.lines.at(-1), " line 79");
-  assert.match(view.hint, /Ctrl\+X stop · Esc back/);
+  assert.match(view.hint, /x stop · Esc back/);
   assert.equal(pane.handleInput(KEYS.pageUp), "handled");
   assert.equal(pane.render(100, 10).lines.at(-1), " line 71");
   pane.handleInput(KEYS.pageDown);
   assert.equal(pane.render(100, 10).lines.at(-1), " line 79");
 });
 
-test("Ctrl+X stops the run and shows a notice; Escape asks to go back", () => {
+test("x stops the run and shows a notice; Escape asks to go back", () => {
   const { run, pane } = setup();
   pane.handleInput(KEYS.stop);
   assert.equal(run.stop.signal.aborted, true);

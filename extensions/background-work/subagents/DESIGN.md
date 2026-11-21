@@ -85,9 +85,10 @@
 - When a run ends, tool rows still showing a partial result get a final one,
   so their redraw timers stop.
 
-## Overlay
+## View
 
-- `/agents` groups the registry into one display row per subagent session,
+- `/tasks` shows subagents next to shell jobs (see `../view.ts`).
+  It groups the registry into one display row per subagent session,
   ordered by newest run first.
   Results without a session id keep separate rows.
   The registry still keeps every active run and the 50 newest finished runs.
@@ -119,7 +120,7 @@
 - Historical results retain custom-agent provenance and user messages for display.
   Historical editing and shell calls retain their transcript renderers,
   but these tools are not registered or available to children.
-- Ctrl+X stops the selected session's active run, even if the detail view
+- `x` stops the selected session's active run, even if the detail view
   opened before that run started.
   The other runs of the same tool call continue,
   and the stopped one fails with "Stopped by the user".
@@ -131,7 +132,7 @@
   A waiting run shows as pending, and stopping it leaves the queue.
 - With `background: true`, the tool returns at once with a unique ID per run and its session ID.
   The runs outlive the tool call, so its abort signal does not stop them.
-  `/agents` and session shutdown can stop them.
+  `/tasks`, `subagent_stop`, and session shutdown can stop them.
 - The saved tool result lists which runs started, not their progress.
   A snapshot would show them running forever after a reload.
 - Each run sends one custom completion message, even if other runs from the same call are still active.
@@ -167,7 +168,7 @@
 ## Cost
 
 - Each result header shows the run's cost.
-  Each `/agents` row sums the retained runs of its session once,
+  Each session's detail header sums the retained runs of its session once,
   deduplicated by the same result key as cost events.
   Tool counts and durations also sum those retained runs.
   Evicted runs can still appear in the saved transcript but not in row totals.

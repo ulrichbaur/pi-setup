@@ -83,7 +83,7 @@ test("the pane fits its height and follows the end of the log", async () => {
     assert.equal(lines[4], "Output (following) · lines 29–40 of 40");
     assert.equal(lines.at(-1), "40  line-40");
     assert.match(hint, /c full command · w wrap · \/\? search/);
-    assert.match(hint, /x stop · Esc close$/);
+    assert.match(hint, /x stop · Esc back$/);
   });
 });
 

@@ -166,16 +166,6 @@ test("malformed own config fails at load with its path and stays unchanged", () 
   }
 });
 
-test("/agents rejects removed navigation actions and has no completions", async () => {
-  const { commands } = load();
-  const notices: string[] = [];
-  const ctx = { ui: { notify: (message: string) => notices.push(message) } };
-  assert.equal(commands.agents.getArgumentCompletions, undefined);
-  await commands.agents.handler("open scout-12345678", ctx);
-  await commands.agents.handler("back", ctx);
-  assert.deepEqual(notices, ["Usage: /agents", "Usage: /agents"]);
-});
-
 test("a background run returns at once and delivers its result later", async () => {
   const { run, sent, arrived, peek } = load();
   assert.deepEqual((await peek()).details, []);

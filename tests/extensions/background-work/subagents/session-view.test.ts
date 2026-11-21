@@ -5,13 +5,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import { AgentsOverlay } from "../../../../extensions/background-work/subagents/agents-view.ts";
 import { savedRuns } from "../../../../extensions/background-work/subagents/restore.ts";
 import { RunRegistry } from "../../../../extensions/background-work/subagents/runs.ts";
 import { sessionRows } from "../../../../extensions/background-work/subagents/session-view.ts";
 import { emptyTranscript } from "../../../../extensions/background-work/subagents/transcript.ts";
 import { transcriptView } from "../../../../extensions/background-work/subagents/transcript-view.ts";
 import { RESULT_MESSAGE_TYPE } from "../../../../extensions/background-work/subagents/types.ts";
+import { BackgroundView } from "../../../../extensions/background-work/view.ts";
+import { keys } from "../fake-keys.ts";
 import { fakeRun } from "./fake-run.ts";
 
 initTheme("dark");
@@ -20,6 +21,20 @@ const theme = {
   bold: (text: string) => text,
 } as unknown as Theme;
 const display = { hideThinking: false, invalidate: () => {} };
+
+function view(registry: RunRegistry, rows: number): BackgroundView {
+  return new BackgroundView(
+    { terminal: { rows }, requestRender() {} } as unknown as TUI,
+    theme,
+    keys,
+    () => {},
+    {
+      subagents: { registry, hideThinking: () => false },
+      unavailable: [],
+    },
+    undefined,
+  );
+}
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "session-view-"));
@@ -93,13 +108,7 @@ test("ask_parent continuation stays one row with continuous history while stream
   try {
     const registry = new RunRegistry();
     registry.add(f.first);
-    const overlay = new AgentsOverlay(
-      { terminal: { rows: 100 }, requestRender() {} } as unknown as TUI,
-      theme,
-      registry,
-      () => {},
-      { hideThinking: () => false },
-    );
+    const overlay = view(registry, 100);
     const screen = () => overlay.render(120).join("\n");
     screen();
     overlay.handleInput("\r");
@@ -110,16 +119,19 @@ test("ask_parent continuation stays one row with continuous history while stream
     f.save([...f.earlier, f.answer, f.newest]);
     continuous(screen());
     assert.equal(screen().match(/Newest response/g)?.length, 1);
-    overlay.handleInput("\x18");
+    overlay.handleInput("x");
     assert.equal(f.resumed.stop.signal.aborted, true);
     assert.equal(f.first.stop.signal.aborted, false);
     f.resumed.result.live = undefined;
     f.resumed.result.messageEnd = 5;
     f.resumed.result.progress.status = "completed";
     continuous(screen());
-    overlay.handleInput("\x1b");
-    assert.match(screen(), /Subagents \(1\)/);
+    // The pane's header sums the session's runs.
     assert.match(screen(), /\$0\.050/);
+    overlay.handleInput("\x1b");
+    // Both runs share one row.
+    assert.match(screen(), /Subagent history/);
+    assert.equal(screen().match(/agent {2}scout-12345678/g)?.length, 1);
     assert.doesNotMatch(screen(), /asks the parent/);
     assert.equal(registry.list().length, 2);
     const entries = [f.first, f.resumed].map((run) => ({
@@ -171,13 +183,7 @@ test("unreadable and oversized history shows a visible warning", () => {
     const registry = new RunRegistry();
     registry.add(f.first);
     registry.add(f.resumed);
-    const overlay = new AgentsOverlay(
-      { terminal: { rows: 40 }, requestRender() {} } as unknown as TUI,
-      theme,
-      registry,
-      () => {},
-      { hideThinking: () => false },
-    );
+    const overlay = view(registry, 40);
     overlay.handleInput("\r");
     writeFileSync(f.path, " ".repeat(10 * 1024 * 1024 + 1));
     assert.match(

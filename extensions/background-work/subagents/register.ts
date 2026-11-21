@@ -5,7 +5,6 @@ import {
   type SubagentCostEvent,
 } from "../../../lib/subagent-cost.ts";
 import { loadAgents } from "./agents.ts";
-import { AgentsOverlay } from "./agents-view.ts";
 import { loadConfig } from "./config.ts";
 import { Limiter } from "./limiter.ts";
 import { combinedText, renderDetails } from "./render.ts";
@@ -21,10 +20,16 @@ import {
   type SubagentDetails,
 } from "./types.ts";
 
+/** What the background-work view needs from the subagent feature. */
+export interface SubagentsHandle {
+  registry: RunRegistry;
+  hideThinking: () => boolean;
+}
+
 export function registerSubagents(
   pi: ExtensionAPI,
   registry: RunRegistry = new RunRegistry(),
-): void {
+): SubagentsHandle {
   const config = loadConfig();
   const agents = loadAgents(config);
   // Tokens of background calls that may still deliver to this session.
@@ -96,33 +101,6 @@ export function registerSubagents(
     for (const token of pending) token.cancelled = true;
     pending.clear();
     for (const run of registry.list()) registry.stop(run);
-  });
-
-  pi.registerCommand("agents", {
-    description: "List subagents, inspect live transcripts, or stop a run",
-    handler: async (args, ctx) => {
-      if (args.trim()) {
-        ctx.ui.notify("Usage: /agents", "warning");
-        return;
-      }
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify("The agents overlay requires TUI mode", "warning");
-        return;
-      }
-      await ctx.ui.custom<void>(
-        (tui, theme, _keybindings, done) =>
-          new AgentsOverlay(tui, theme, registry, done, { hideThinking }),
-        {
-          overlay: true,
-          overlayOptions: {
-            anchor: "center",
-            width: "90%",
-            minWidth: 60,
-            maxHeight: "90%",
-          },
-        },
-      );
-    },
   });
 
   let savedCost = 0;
@@ -228,4 +206,5 @@ export function registerSubagents(
       ctx.ui.notify(`Subagent session cleanup failed: ${message}`, "warning");
     });
   });
+  return { registry, hideThinking };
 }

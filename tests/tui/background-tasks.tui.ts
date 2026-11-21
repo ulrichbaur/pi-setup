@@ -125,6 +125,7 @@ test("/tasks manages jobs and announces results without interrupting tools", {
     const pastId = "00112233-4455-6677-8899-aabbccddeeff";
     const pastDir = record(pastId, {
       label: "Past job",
+      startedAt: "2026-01-01T00:00:00.000Z",
       command: "printf 'past output\\n'\nexit 2",
       exitCode: 2,
     });
@@ -162,7 +163,8 @@ test("/tasks manages jobs and announces results without interrupting tools", {
         "-x",
         "120",
         "-y",
-        "40",
+        // 85% of 25 rows gives the view 21 rows.
+        "25",
         "-c",
         project,
         "env",
@@ -196,9 +198,9 @@ test("/tasks manages jobs and announces results without interrupting tools", {
       press("M-t");
       // The worker may still be starting the shell when the list opens.
       const list = await screen(
-        /> [0-9a-f-]{5,36} · Running.*Live job[\s\S]*History/,
+        /> task {3}[0-9a-f-]{5,36} +Running.*Live job[\s\S]*Shell history/,
       );
-      assert.match(list, /Failed \(exit 2\) · [^·]+ · Past job/);
+      assert.match(list, /task {3}00112 +Failed \(exit 2\) · \S+ +Past job/);
       press("Enter");
       const tail = await screen(/^40 {2}line-40$/m);
       assert.match(tail, /Output \(following\) · lines 29–40 of 40/);
@@ -270,13 +272,16 @@ test("/tasks manages jobs and announces results without interrupting tools", {
       press("x");
       await screen(/Stopping/);
       await screen(/Stopped/);
+      // Escape leaves the details, then closes the view.
+      press("Escape");
+      await screen(/Background work/);
       press("Escape");
       await screen(/^(?![\s\S]*╭─+╮)[\s\S]*Unsubmitted draft/);
       press("C-u");
       press("/", "t", "a", "s", "k", "s", "Space");
-      await screen(/00112\s+Failed \(exit 2\) · Past job/);
+      await screen(/00112\s+task · Failed \(exit 2\)[^\n]*Past job/);
       press("0", "0", "1");
-      await screen(/00112\s+Failed \(exit 2\) · Past job/);
+      await screen(/00112\s+task · Failed \(exit 2\)[^\n]*Past job/);
       press("Tab");
       await screen(/\/tasks 00112/);
       press("Enter");
@@ -293,6 +298,8 @@ test("/tasks manages jobs and announces results without interrupting tools", {
       const expanded = await screen(/^exit 2$/m);
       assert.match(expanded, /^1 {2}past output$/m);
       await screen(/^(?![\s\S]*\d+ running)[\s\S]*fake-model/);
+      press("Escape");
+      await screen(/Background work/);
       press("Escape");
       await screen(
         /^(?![\s\S]*╭─+╮)[\s\S]*Background task \(Live job\) stopped/,
@@ -311,13 +318,17 @@ test("/tasks manages jobs and announces results without interrupting tools", {
       // A second job with the same short prefix makes the prefix ambiguous.
       record("00112233-5455-6677-8899-aabbccddeeff", { label: "Other job" });
       tmux("send-keys", "-t", "tasks", "-l", `/tasks ${pastId.slice(0, 5)}`);
-      await screen(/00112233-4\s+Failed \(exit 2\) · Past job/);
+      await screen(/00112233-4\s+task · Failed \(exit 2\)[^\n]*Past job/);
       press("Escape", "Enter");
-      await screen(/Multiple jobs match. Enter a longer job ID prefix\./);
+      await screen(
+        /Multiple jobs or subagents match\. Enter a longer prefix\./,
+      );
       tmux("send-keys", "-t", "tasks", "-l", `/tasks ${pastId.slice(0, 10)}`);
-      await screen(/00112233-4\s+Failed \(exit 2\) · Past job/);
+      await screen(/00112233-4\s+task · Failed \(exit 2\)[^\n]*Past job/);
       press("Tab", "Enter");
       await screen(/^1 {2}past output$/m);
+      press("Escape");
+      await screen(/Background work/);
       press("Escape");
       await screen(/^(?![\s\S]*╭─+╮)[\s\S]*fake-model/);
       command("Start the steer case");
